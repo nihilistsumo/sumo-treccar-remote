@@ -52,7 +52,8 @@ public class CustomTopicInferencer implements Serializable {
 			topicMask = Integer.highestOneBit(numTopics) * 2 - 1;
 			topicBits = Integer.bitCount(topicMask);
 		}
-		topicMask = numTopics - 1;
+		//topicMask = numTopics - 1;
+		//topicBits = Integer.bitCount(topicMask);
 		this.alpha = alpha;
 		this.beta = beta;
 		this.betaSum = betaSum;

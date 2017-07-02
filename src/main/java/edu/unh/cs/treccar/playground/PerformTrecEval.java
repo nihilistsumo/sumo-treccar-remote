@@ -16,7 +16,7 @@ public class PerformTrecEval {
 	
 	public static void main(String[] args){
 		String workDir = "/home/sumanta/Documents/new_research/unh/test200-v1.4results/custom_lda_and_km_results";
-		String assign_filename = "trec_k_umm";
+		String assign_filename = "garbage_trec";
 		PerformTrecEval pte = new PerformTrecEval();
 		HashSet<String> runids = pte.getRunIDs(workDir+"/"+assign_filename);
 		String tempFilepath = workDir+"/temp";

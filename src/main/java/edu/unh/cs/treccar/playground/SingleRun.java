@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.DoubleSummaryStatistics;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Random;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -131,12 +132,15 @@ public class SingleRun {
 		}
 		double sumRAND = 0,sumSqrDev = 0, meanRAND, stdDevRAND, stderrRAND;
 		for(Double randVal:pageRAND.values()){
-			if(!randVal.isNaN())
+			// We may have some null rand values for which rand index could not be computed
+			// (e.g. nom=0.0, denom=0.0), we simply dont add them in our final calc
+			if(randVal!=null)
 				sumRAND+=randVal;
 		}
 		meanRAND = sumRAND/pageRAND.size();
 		for(Double randVal:pageRAND.values())
-			sumSqrDev+=Math.pow(randVal - meanRAND, 2);
+			if(randVal!=null)
+				sumSqrDev+=Math.pow(randVal - meanRAND, 2);
 		stdDevRAND = Math.sqrt((sumSqrDev/pageRAND.size()));
 		stderrRAND = stdDevRAND/Math.sqrt(pageRAND.size());
 		try {
@@ -187,8 +191,10 @@ public class SingleRun {
 			}
 			CustomLDA lda = new CustomLDA(numTopics, this.alphaSum, this.beta);
 			try {
-				lda.addInstances(paraIList);
-				lda.sample(this.numIter);
+				//lda.addInstances(paraIList);
+				//lda.sample(this.numIter);
+				lda.addInstancesUnigram(paraIList);
+				lda.sampleUMM(this.numIter);
 				//System.out.println(lda.topWords(10));
 				result = assignUsingLDA(paraIList, queryIList, lda, currPage);
 				
@@ -200,6 +206,10 @@ public class SingleRun {
 		case 2:
 			//cluster
 			System.out.println("Cluster not implemented yet!");
+			break;
+		case 99:
+			//random
+			result = assignUsingRandom(paraIList, queryIList, currPage);
 			break;
 		default:
 			System.out.println("Wrong model option!");
@@ -223,12 +233,59 @@ public class SingleRun {
 		}
 		return idAssign;
 	}
+	private ResultForPage assignUsingRandom(InstanceList paraIList, InstanceList queryIList, Data.Page page){
+		Random rand = new Random();
+		HashMap<String, ArrayList<String>> assign = new HashMap<String, ArrayList<String>>();
+		ArrayList<ArrayList<String>> paraClusters = new ArrayList<ArrayList<String>>();
+		ResultForPage r = new ResultForPage();
+		ArrayList<String> queryIDs = new ArrayList<String>();
+		ArrayList<String> paraIDs = new ArrayList<String>();
+		for(Instance qIns:queryIList){
+			String pageid = page.getPageId();
+			String q = qIns.getName().toString();
+			if(q.equals(pageid))
+				q = pageid;
+			else
+				q = pageid+"/"+q;
+			assign.put(q, new ArrayList<String>());
+			queryIDs.add(q);
+		}
+		for(Instance pIns:paraIList)
+			paraIDs.add(pIns.getName().toString());
+		int qindex=0, pindex;
+		// To guarantee that every sec/que got some para //
+		while(!paraIDs.isEmpty() && qindex<queryIDs.size()){
+			if(paraIDs.size()>1)
+				pindex = rand.nextInt(paraIDs.size()-1);
+			else
+				pindex = 0;
+			assign.get(queryIDs.get(qindex)).add(paraIDs.get(pindex));
+			paraIDs.remove(pindex);
+			qindex++;
+		}
+		// ---------------------------------------------- //
+		while(!paraIDs.isEmpty()){
+			qindex = rand.nextInt(queryIDs.size()-1);
+			if(paraIDs.size()>1)
+				pindex = rand.nextInt(paraIDs.size()-1);
+			else
+				pindex = 0;
+			
+			assign.get(queryIDs.get(qindex)).add(paraIDs.get(pindex));
+			paraIDs.remove(pindex);
+		}
+		for(String qry:assign.keySet())
+			paraClusters.add(assign.get(qry));
+		r.setQueryParaAssignment(assign);
+		r.setParaClusters(paraClusters);
+		return r;
+	}
 	private ResultForPage assignUsingLDA(InstanceList paraIList, InstanceList queryIList, CustomLDA lda, Data.Page page) throws Exception{
 		HashMap<Instance, ArrayList<Instance>> assign = new HashMap<Instance, ArrayList<Instance>>();
 		for(Instance qIns:queryIList)
 			assign.put(qIns, new ArrayList<Instance>());
 		
-		CustomTopicInferencer inf = lda.getInferencer();
+		TopicInferencer inf = lda.getInferencer();
 		int numIterForInf = 30;
 		int thinningForInf = 1;
 		int burninForInf = 5;

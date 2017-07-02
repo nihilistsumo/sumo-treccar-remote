@@ -6,8 +6,8 @@ import com.trolltech.qt.gui.*;
 
 public class RunExperiment {
 	
-	public static final String RAND_RESULT_FILENAME = "rand_k_umm";
-	public static final String TRECEVAL_ASSIGN_FILENAME = "trec_k_umm";
+	public static final String RAND_RESULT_FILENAME = "garbage";
+	public static final String TRECEVAL_ASSIGN_FILENAME = "garbage_trec";
 	
 	public static void main(String[] args) {
 		// TODO Auto-generated method stub
@@ -37,7 +37,7 @@ public class RunExperiment {
         String stepK="1", stepIter="1", stepAlpha="1", stepBeta="1";
         boolean[] isVar = {true, false, false, false};
         if(isVar[0]){
-        	stopK = "21";
+        	stopK = "10";
         	stepK = "1";
         }
         if(isVar[1]){

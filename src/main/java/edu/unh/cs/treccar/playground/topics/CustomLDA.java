@@ -10,7 +10,6 @@ package edu.unh.cs.treccar.playground.topics;
 import java.util.*;
 import java.util.logging.*;
 import java.util.zip.*;
-
 import java.io.*;
 import java.text.NumberFormat;
 
@@ -43,7 +42,12 @@ public class CustomLDA implements Serializable {
 	
 	// The number of topics requested
 	protected int numTopics;
-
+	
+	// These values are used to encode type/topic counts as
+	//  count/topic pairs in a single int.
+	public int topicMask;
+	public int topicBits;
+	
 	// The size of the vocabulary
 	protected int numTypes;
 
@@ -100,6 +104,17 @@ public class CustomLDA implements Serializable {
 		this.beta = beta;
 		this.random = random;
 		
+		if (Integer.bitCount(numTopics) == 1) {
+			// exact power of 2
+			topicMask = numTopics - 1;
+			topicBits = Integer.bitCount(topicMask);
+		}
+		else {
+			// otherwise add an extra bit
+			topicMask = Integer.highestOneBit(numTopics) * 2 - 1;
+			topicBits = Integer.bitCount(topicMask);
+		}
+		
 		oneDocTopicCounts = new int[numTopics];
 		tokensPerTopic = new int[numTopics];
 		
@@ -134,6 +149,7 @@ public class CustomLDA implements Serializable {
 		betaSum = beta * numTypes;
 		
 		typeTopicCounts = new int[numTypes][numTopics];
+		initTypeTopicCounts();
 
 		int doc = 0;
 
@@ -152,7 +168,8 @@ public class CustomLDA implements Serializable {
 				tokensPerTopic[topic]++;
 				
 				int type = tokens.getIndexAtPosition(position);
-				typeTopicCounts[type][topic]++;
+				//typeTopicCounts[type][topic]++;
+				typeTopicCounts[type][topic] += topicMask+1;
 			}
 
 			TopicAssignment t = new TopicAssignment (instance, topicSequence);
@@ -160,7 +177,7 @@ public class CustomLDA implements Serializable {
 		}
 
 	}
-
+	
 	public void sample (int iterations) throws IOException {
 
 		for (int iteration = 1; iteration <= iterations; iteration++) {
@@ -174,8 +191,7 @@ public class CustomLDA implements Serializable {
 				LabelSequence topicSequence =
 					(LabelSequence) data.get(doc).topicSequence;
 
-				//sampleTopicsForOneDoc (tokenSequence, topicSequence);
-				sampleTopicsForOneDocUnigram(tokenSequence, topicSequence);
+				sampleTopicsForOneDoc (tokenSequence, topicSequence);
 			}
 		
             long elapsedMillis = System.currentTimeMillis() - iterationStart;
@@ -222,7 +238,7 @@ public class CustomLDA implements Serializable {
 			localTopicCounts[oldTopic]--;
 			tokensPerTopic[oldTopic]--;
 			assert(tokensPerTopic[oldTopic] >= 0) : "old Topic " + oldTopic + " below 0";
-			currentTypeTopicCounts[oldTopic]--;
+			currentTypeTopicCounts[oldTopic]-=topicMask+1;
 
 			// Now calculate and add up the scores for each topic for this word
 			sum = 0.0;
@@ -232,7 +248,7 @@ public class CustomLDA implements Serializable {
 			for (int topic = 0; topic < numTopics; topic++) {
 				score =
 					(alpha + localTopicCounts[topic]) *
-					((beta + currentTypeTopicCounts[topic]) /
+					((beta + (currentTypeTopicCounts[topic] >> topicBits)) /
 					 (betaSum + tokensPerTopic[topic]));
 				sum += score;
 				topicTermScores[topic] = score;
@@ -257,7 +273,7 @@ public class CustomLDA implements Serializable {
 			oneDocTopics[position] = newTopic;
 			localTopicCounts[newTopic]++;
 			tokensPerTopic[newTopic]++;
-			currentTypeTopicCounts[newTopic]++;
+			currentTypeTopicCounts[newTopic]+=topicMask+1;
 		}
 	}
 	
@@ -568,11 +584,11 @@ public class CustomLDA implements Serializable {
 	}
 	
 	// Custom methods: Author- Sumanta
-	public CustomTopicInferencer getInferencer(){
+	public TopicInferencer getInferencer(){
 		double[] alphaVals = new double[this.numTopics];
 		for(int i=0; i<this.numTopics; i++)
 			alphaVals[i] = this.alpha;
-		CustomTopicInferencer inf = new CustomTopicInferencer(this.typeTopicCounts, this.tokensPerTopic, this.alphabet, alphaVals, this.beta, this.betaSum);
+		TopicInferencer inf = new TopicInferencer(this.typeTopicCounts, this.tokensPerTopic, this.alphabet, alphaVals, this.beta, this.betaSum);
 		return inf;
 	}
 	public double[] getTopicProbabilities(int instanceIndex){
@@ -598,107 +614,131 @@ public class CustomLDA implements Serializable {
 		}
 		return topicDist;
 	}
+	// addInstances method for unigram style //
+	public void addInstancesUnigram (InstanceList training) {
+
+		alphabet = training.getDataAlphabet();
+		numTypes = alphabet.size();
+
+		betaSum = beta * numTypes;
+
+		typeTopicCounts = new int[numTypes][numTopics];
+		initTypeTopicCounts();
+
+		int doc = 0;
+
+		for (Instance instance : training) {
+			doc++;
+
+			FeatureSequence tokens = (FeatureSequence) instance.getData();
+			LabelSequence topicSequence =
+					new LabelSequence(topicAlphabet, new int[ tokens.size() ]);
+
+			int[] topics = topicSequence.getFeatures();
+			int topic = random.nextInt(numTopics);
+			for (int position = 0; position < tokens.size(); position++) {
+				topics[position] = topic;
+				tokensPerTopic[topic]++;
+
+				int type = tokens.getIndexAtPosition(position);
+				typeTopicCounts[type][topic]+=topicMask+1;
+			}
+
+			TopicAssignment t = new TopicAssignment (instance, topicSequence);
+			data.add (t);
+		}
+	}
+	public void sampleUMM (int iterations) throws IOException {
+
+		for (int iteration = 1; iteration <= iterations; iteration++) {
+
+			long iterationStart = System.currentTimeMillis();
+			//System.out.println("Iteration "+iteration);
+			// Loop over every document in the corpus
+			for (int doc = 0; doc < data.size(); doc++) {
+				FeatureSequence tokenSequence =
+					(FeatureSequence) data.get(doc).instance.getData();
+				LabelSequence topicSequence =
+					(LabelSequence) data.get(doc).topicSequence;
+
+				sampleTopicsForOneDocUnigram (tokenSequence, topicSequence);
+				/*
+				System.out.print("Para "+doc+" topic seq: [");
+				for(int i=0; i<data.get(doc).topicSequence.getLength(); i++){
+					System.out.print(data.get(doc).topicSequence.getIndexAtPosition(i)+" ");
+				}
+				System.out.print("]\n");
+				*/
+			}
+		
+            long elapsedMillis = System.currentTimeMillis() - iterationStart;
+			logger.fine(iteration + "\t" + elapsedMillis + "ms\t");
+
+			// Occasionally print more information
+			if (showTopicsInterval != 0 && iteration % showTopicsInterval == 0) {
+				logger.info("<" + iteration + "> Log Likelihood: " + modelLogLikelihood() + "\n" +
+							topWords (wordsPerTopic));
+			}
+
+		}
+	}
+	private void initTypeTopicCounts(){
+		for(int type=0; type<numTypes; type++){
+			for(int topic=0; topic<numTopics; topic++)
+				typeTopicCounts[type][topic] = topic;
+		}
+	}
 	protected void sampleTopicsForOneDocUnigram (FeatureSequence tokenSequence,
 			  FeatureSequence topicSequence) {
 		int[] oneDocTopics = topicSequence.getFeatures();
-
-		int[] currentTypeTopicCounts;
-		int type, oldTopic, newTopic;
-		double topicWeightsSum;
+		int oldTopic, newTopic;
 		int docLength = tokenSequence.getLength();
 
 		int[] localTopicCounts = new int[numTopics];
-
-		//		populate topic counts
-		for (int position = 0; position < docLength; position++) {
-			localTopicCounts[oneDocTopics[position]]++;
-		}
-
 		double score, sum;
+
+		//		remove current topic counts
+		for (int position = 0; position < docLength; position++) {
+			oldTopic = oneDocTopics[position];
+			tokensPerTopic[oldTopic]--;
+		}
+		sum = 0.0;
+		
 		double[] topicTermScores = new double[numTopics];
-
-		//	Iterate over the positions (words) in the document 
-		for (int position = 0; position < docLength; position++) {
-			type = tokenSequence.getIndexAtPosition(position);
-			oldTopic = oneDocTopics[position];
-
-			// Grab the relevant row from our two-dimensional array
-			currentTypeTopicCounts = typeTopicCounts[type];
-
-			//	Remove this token from all counts. 
-			localTopicCounts[oldTopic]--;
-			tokensPerTopic[oldTopic]--;
-			assert(tokensPerTopic[oldTopic] >= 0) : "old Topic " + oldTopic + " below 0";
-			currentTypeTopicCounts[oldTopic]--;
-
-			// Now calculate and add up the scores for each topic for this word
-			sum = 0.0;
-			
-			// Here's where the math happens! Note that overall performance is 
-			//  dominated by what you do in this loop.
-			for (int topic = 0; topic < numTopics; topic++) {
-				score =
+		
+		// Here's where the math happens! Note that overall performance is 
+		//  dominated by what you do in this loop.
+		for (int topic = 0; topic < numTopics; topic++) {
+			score =
 					(alpha + localTopicCounts[topic]) *
-					((beta + currentTypeTopicCounts[topic]) /
-					 (betaSum + tokensPerTopic[topic]));
-				sum += score;
-				topicTermScores[topic] = score;
-			}
-			
-			// Choose a random point between 0 and the sum of all topic scores
-			double sample = random.nextUniform() * sum;
+					((beta + localTopicCounts[topic]) /
+							(betaSum + tokensPerTopic[topic]));
+			sum += score;
+			topicTermScores[topic] = score;
+		}
 
-			// Figure out which topic contains that point
-			newTopic = -1;
-			while (sample > 0.0) {
-				newTopic++;
-				sample -= topicTermScores[newTopic];
-			}
+		// Choose a random point between 0 and the sum of all topic scores
+		double sample = random.nextUniform() * sum;
 
-			// Make sure we actually sampled a topic
-			if (newTopic == -1) {
-				throw new IllegalStateException ("SimpleLDA: New topic not sampled.");
-			}
+		// Figure out which topic contains that point
+		newTopic = -1;
+		while (sample > 0.0) {
+			newTopic++;
+			sample -= topicTermScores[newTopic];
+		}
 
-			// Put that new topic into the counts
-			oneDocTopics[position] = newTopic;
-			localTopicCounts[newTopic]++;
-			tokensPerTopic[newTopic]++;
-			currentTypeTopicCounts[newTopic]++;
+		// Make sure we actually sampled a topic
+		if (newTopic == -1) {
+			throw new IllegalStateException ("SimpleLDA: New topic not sampled.");
 		}
 		
-		// Getting the highest topic//
-		int highestTopic = 0;
-		int highestTopicFreq = 0;
-		for(int topic=0; topic<numTopics; topic++){
-			if(localTopicCounts[topic]>highestTopicFreq){
-				highestTopicFreq = localTopicCounts[topic];
-				highestTopic = topic;
-			}
-		}
-		// ------------------------ //
-		
-		// Putting the highest topic to every token in doc //
+		// Putting the new topic to every token in doc //
 		for (int position = 0; position < docLength; position++) {
-			type = tokenSequence.getIndexAtPosition(position);
-			oldTopic = oneDocTopics[position];
-
-			// Grab the relevant row from our two-dimensional array
-			currentTypeTopicCounts = typeTopicCounts[type];
-
-			//	Remove this token from all counts. 
-			localTopicCounts[oldTopic]--;
-			tokensPerTopic[oldTopic]--;
-			assert(tokensPerTopic[oldTopic] >= 0) : "old Topic " + oldTopic + " below 0";
-			currentTypeTopicCounts[oldTopic]--;
-			
-			newTopic = highestTopic;
 			
 			// Put that new topic into the counts
 			oneDocTopics[position] = newTopic;
 			localTopicCounts[newTopic]++;
 			tokensPerTopic[newTopic]++;
-			currentTypeTopicCounts[newTopic]++;
 		}
 		// ------------------------------------------------- //
 	}
