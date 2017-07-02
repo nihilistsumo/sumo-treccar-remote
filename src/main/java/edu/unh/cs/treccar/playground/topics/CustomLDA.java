@@ -695,29 +695,46 @@ public class CustomLDA implements Serializable {
 		int docLength = tokenSequence.getLength();
 
 		int[] localTopicCounts = new int[numTopics];
+		
 		double score, sum;
+		int[] currentTypeTopicCounts;
+		int type;
 
-		//		remove current topic counts
+		//		populate topic counts
 		for (int position = 0; position < docLength; position++) {
-			oldTopic = oneDocTopics[position];
-			tokensPerTopic[oldTopic]--;
+			localTopicCounts[oneDocTopics[position]]++;
 		}
+		double[] topicTermScores = new double[numTopics];
 		sum = 0.0;
 		
-		double[] topicTermScores = new double[numTopics];
-		
-		// Here's where the math happens! Note that overall performance is 
-		//  dominated by what you do in this loop.
+		// Loop to populate topicTermScores //
 		for (int topic = 0; topic < numTopics; topic++) {
-			score =
-					(alpha + localTopicCounts[topic]) *
-					((beta + localTopicCounts[topic]) /
-							(betaSum + tokensPerTopic[topic]));
-			sum += score;
-			topicTermScores[topic] = score;
-		}
+			double prod = 1;
+			for(int pos=0; pos<docLength; pos++){
+				type = tokenSequence.getIndexAtPosition(pos);
+				oldTopic = oneDocTopics[pos];
 
+				// Grab the relevant row from our two-dimensional array
+				currentTypeTopicCounts = typeTopicCounts[type];
+
+				//	Remove this token from all counts. 
+				localTopicCounts[oldTopic]--;
+				tokensPerTopic[oldTopic]--;
+				assert(tokensPerTopic[oldTopic] >= 0) : "old Topic " + oldTopic + " below 0";
+				currentTypeTopicCounts[oldTopic]-=topicMask+1;
+				score =
+						(alpha + localTopicCounts[topic]) *
+						((beta + (currentTypeTopicCounts[topic] >> topicBits)) /
+						 (betaSum + tokensPerTopic[topic]));
+				prod *= score;
+			}
+			topicTermScores[topic] = prod;
+			sum += prod;
+		}
+		// ------------------------------ //
+		
 		// Choose a random point between 0 and the sum of all topic scores
+		System.out.println("Sum = "+sum);
 		double sample = random.nextUniform() * sum;
 
 		// Figure out which topic contains that point
@@ -734,11 +751,13 @@ public class CustomLDA implements Serializable {
 		
 		// Putting the new topic to every token in doc //
 		for (int position = 0; position < docLength; position++) {
-			
+			type = tokenSequence.getIndexAtPosition(position);
+			currentTypeTopicCounts = typeTopicCounts[type];
 			// Put that new topic into the counts
 			oneDocTopics[position] = newTopic;
 			localTopicCounts[newTopic]++;
 			tokensPerTopic[newTopic]++;
+			currentTypeTopicCounts[newTopic]+=topicMask+1;
 		}
 		// ------------------------------------------------- //
 	}
