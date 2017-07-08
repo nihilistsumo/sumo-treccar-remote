@@ -1,6 +1,7 @@
 package edu.unh.cs.treccar.playground;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 
 public class MeasureExperiment {
@@ -27,6 +28,10 @@ public class MeasureExperiment {
 			ArrayList<ArrayList<String>> clusters = r.getParaClusters();
 			ArrayList<ArrayList<String>> currGTClusters = new ArrayList<ArrayList<String>>();
 			for(String gtQuery:gt.keySet()){
+				if(pageID.equals("Whole%20Corpus")){
+					currGTClusters = new ArrayList<ArrayList<String>>(gt.values());
+					break;
+				}
 				if(gtQuery.startsWith(pageID))
 					currGTClusters.add(gt.get(gtQuery));
 			}
@@ -55,16 +60,40 @@ public class MeasureExperiment {
 					contingencyMatrix[i][j] = matchCount;
 				}
 			}
+			System.out.println("Contingency table for "+pageID);
 			printContingencyMatrix(contingencyMatrix);
 			Double rand = computeRand(contingencyMatrix);
 			if(rand.isNaN()){
 				System.out.println("Adjusted Rand index could not be computed!");
-				pageRANDMap.put(pageID, null);
+				pageRANDMap.put(pageID, -99.0);
 			} else{
 				pageRANDMap.put(pageID, rand);
 			}
 		}
 		return pageRANDMap;
+	}
+	public HashMap<String, Double> calculatePurityPerPage(){
+		return this.calculatePurityPerPage(this.getResultFromExperiment(), this.getGtMap());
+	}
+	public HashMap<String, Double> calculatePurityPerPage(HashMap<String, ResultForPage> results, 
+			HashMap<String, ArrayList<String>> gt){
+		HashMap<String, Double> pagePurityMap = new HashMap<String, Double>();
+		for(String pageID:results.keySet()){
+			ResultForPage r = results.get(pageID);
+			ArrayList<ArrayList<String>> clusters = r.getParaClusters();
+			ArrayList<ArrayList<String>> currGTClusters = new ArrayList<ArrayList<String>>();
+			for(String gtQuery:gt.keySet()){
+				if(gtQuery.startsWith(pageID))
+					currGTClusters.add(gt.get(gtQuery));
+			}
+			Double purity = computePurity(clusters, currGTClusters);
+			if(purity.isNaN()){
+				System.out.println("Purity could not be computed");
+				pagePurityMap.put(pageID, purity);
+			} else
+				pagePurityMap.put(pageID, purity);
+		}
+		return pagePurityMap;
 	}
 	private double computeRand(int[][] contMat){
 		double score = 0.0;
@@ -107,6 +136,27 @@ public class MeasureExperiment {
 		double nom = (sumnij-((double)(sumni*sumnj))/nC2);
 		System.out.println("n: "+n+", sumnij: "+sumnij+", sumni: "+sumni+", sumnj: "+sumnj+", nC2: "+nC2+", nom: "+nom+", denom: "+denom);
 		score = nom/denom;
+		return score;
+	}
+	public double computePurity(ArrayList<ArrayList<String>> candidateClusters, ArrayList<ArrayList<String>> gtClusters){
+		String result = "";
+		int n=0, sum=0, tempMaxCount, maxCount;
+		double score=0.0;
+		for(ArrayList<String> currCandCluster:candidateClusters){
+			maxCount=0;
+			n+=currCandCluster.size();
+			for(ArrayList<String> currGTCluster:gtClusters){
+				tempMaxCount = 0;
+				for(String candPara:currCandCluster){
+					if(currGTCluster.contains(candPara))
+						tempMaxCount++;
+				}
+				if(tempMaxCount>maxCount)
+					maxCount = tempMaxCount;
+			}
+			sum+=maxCount;
+		}
+		score = ((double)sum)/n;
 		return score;
 	}
 	private int nC2(int n){

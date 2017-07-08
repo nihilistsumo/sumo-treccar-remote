@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.DoubleSummaryStatistics;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Random;
 import java.util.Set;
 import java.util.regex.Pattern;
@@ -41,6 +42,8 @@ public class SingleRun {
 	private HashMap<String, ArrayList<String>> articleParaMap = null;
 	private ArrayList<Data.Paragraph> paraList = null;
 	private ArrayList<Data.Page> pageList = null;
+	public HashMap<String, Double> pageRAND;
+	public HashMap<String, Double> pagePurity;
 	
 	
 	public SingleRun(String[] args){
@@ -72,8 +75,14 @@ public class SingleRun {
 	}
 	public void runExperiment(){
 		HashMap<String, ResultForPage> resultPerPageID = new HashMap<String, ResultForPage>();
+		int[] luckyPageids = {5, 25, 35};
+		int pageid = -1;
 		for(Data.Page page:this.pageList){
+			pageid++;
+			if(pageid!=luckyPageids[0] && pageid!=luckyPageids[1] && pageid!=luckyPageids[2])
+				continue;
 			String pageID = page.getPageId();
+			System.out.println("PAGE ID: "+pageID);
 			ArrayList<String> paraIDs = this.articleParaMap.get(pageID);
 			ArrayList<Data.Paragraph> paraObjects = getParasFromIDs(paraIDs);
 			InstanceList paraIList = convertParasToIList(paraObjects);
@@ -126,9 +135,15 @@ public class SingleRun {
 		}
 		// Measure performance from resultPerPageID and store result
 		MeasureExperiment me = new MeasureExperiment(resultPerPageID, this.gtSecParaMap);
-		HashMap<String, Double> pageRAND = me.calculateRANDPerPage();
+		pageRAND = me.calculateRANDPerPage();
+		System.out.println("RAND scores\n-----------\n");
 		for(String p:pageRAND.keySet()){
 			System.out.println(p+" "+pageRAND.get(p));
+		}
+		pagePurity = me.calculatePurityPerPage();
+		System.out.println("Purity scores\n-------------\n");
+		for(String p:pagePurity.keySet()){
+			System.out.println(p+" "+pagePurity.get(p));
 		}
 		double sumRAND = 0,sumSqrDev = 0, meanRAND, stdDevRAND, stderrRAND;
 		for(Double randVal:pageRAND.values()){
@@ -143,9 +158,47 @@ public class SingleRun {
 				sumSqrDev+=Math.pow(randVal - meanRAND, 2);
 		stdDevRAND = Math.sqrt((sumSqrDev/pageRAND.size()));
 		stderrRAND = stdDevRAND/Math.sqrt(pageRAND.size());
+		
+		double sumPurity = 0,sumSqrDevP = 0, meanPurity, stdDevP, stderrPurity;
+		for(Double pVal:pagePurity.values()){
+			if(pVal!=null)
+				sumPurity+=pVal;
+		}
+		meanPurity = sumPurity/pagePurity.size();
+		for(Double pVal:pagePurity.values())
+			if(pVal!=null)
+				sumSqrDevP+=Math.pow(pVal - meanPurity, 2);
+		stdDevP = Math.sqrt((sumSqrDevP/pagePurity.size()));
+		stderrPurity = stdDevP/Math.sqrt(pagePurity.size());
 		try {
-			FileWriter fw = new FileWriter(this.outputPath+"/"+RunExperiment.RAND_RESULT_FILENAME, true);
-			fw.write(this.k+" "+this.numIter+" "+this.model+" "+this.tw+" "+this.alphaSum+" "+this.beta+" "+meanRAND+" "+stderrRAND+"\n");
+			FileWriter fw = new FileWriter(this.outputPath+"/"+RunExperiment.CLUSTERING_MEASURE_FILENAME, true);
+			fw.write(this.k+" "+this.numIter+" "+this.model+" "+this.tw+" "+this.alphaSum+" "+this.beta+" "+meanRAND+" "+stderrRAND+" "+meanPurity+" "+stderrPurity+"\n");
+			fw.close();
+		} catch (IOException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+	}
+	public void runExperimentWholeCorpus(){
+		HashMap<String, ResultForPage> resultForCorpus = new HashMap<String, ResultForPage>();
+		List<Data.PageSkeleton> dummySkeleton = pageList.get(0).getSkeleton();
+		Data.Page corpus = new Data.Page("Whole Corpus", "Whole%20Corpus", dummySkeleton);
+		HashMap<String, ArrayList<String>> corpusGT = this.articleParaMap;
+		ArrayList<String> queryids = new ArrayList<String>();
+		for(Data.Page p:this.pageList)
+			queryids.add(p.getPageId());
+		InstanceList paraIList = convertParasToIList(this.paraList);
+		InstanceList qIList = convertQueriesToIList(queryids);
+		resultForCorpus.put(corpus.getPageId(), getAssignment(paraIList, qIList, corpus));
+		
+		// Measure performance from resultPerPageID and store result
+		MeasureExperiment me = new MeasureExperiment(resultForCorpus, corpusGT);
+		double randCorpus = (Double)me.calculateRANDPerPage().values().toArray()[0];
+		double purityCorpus = (Double)me.calculatePurityPerPage().values().toArray()[0];
+		System.out.println("Corpus RAND score = "+randCorpus+", Purity score = "+purityCorpus);
+		try {
+			FileWriter fw = new FileWriter(this.outputPath+"/"+RunExperiment.CLUSTERING_MEASURE_FILENAME, true);
+			fw.write(this.k+" "+this.numIter+" "+this.model+" "+this.tw+" "+this.alphaSum+" "+this.beta+" "+randCorpus+" 0 "+purityCorpus+" 0\n");
 			fw.close();
 		} catch (IOException e) {
 			// TODO Auto-generated catch block

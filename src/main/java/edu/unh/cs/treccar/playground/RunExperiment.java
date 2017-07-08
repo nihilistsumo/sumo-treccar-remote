@@ -6,8 +6,9 @@ import com.trolltech.qt.gui.*;
 
 public class RunExperiment {
 	
-	public static final String RAND_RESULT_FILENAME = "garbage";
+	public static final String CLUSTERING_MEASURE_FILENAME = "garbage";
 	public static final String TRECEVAL_ASSIGN_FILENAME = "garbage_trec";
+	public static final boolean RUN_BY_PAGE = false;
 	
 	public static void main(String[] args) {
 		// TODO Auto-generated method stub
@@ -32,10 +33,10 @@ public class RunExperiment {
         */
         String model = "1";
         String tw = "0"; // currently ignored
-        String startK="0", startIter="30", startAlpha="1.3", startBeta="0.3"; // treat Aplpha as AplphaSum
+        String startK="200", startIter="30", startAlpha="1.3", startBeta="-1"; // treat Alpha as AplphaSum
         String stopK=startK, stopIter=startIter, stopAlpha=startAlpha, stopBeta=startBeta;
         String stepK="1", stepIter="1", stepAlpha="1", stepBeta="1";
-        boolean[] isVar = {true, false, false, false};
+        boolean[] isVar = {false, false, false, false};
         if(isVar[0]){
         	stopK = "10";
         	stepK = "1";
@@ -63,7 +64,10 @@ public class RunExperiment {
         		        		"/home/sumanta/Documents/new_research/unh/test200-v1.4/all.test200.cbor.toplevel.qrels",
         		        		"/home/sumanta/Documents/new_research/unh/test200-v1.4/all.test200.cbor.article.qrels",
         		        		"/home/sumanta/Documents/new_research/unh/test200-v1.4results/custom_lda_and_km_results"});
-        		        sr.runExperiment();
+        		        if(RunExperiment.RUN_BY_PAGE)
+        		        	sr.runExperiment();
+        		        else
+        		        	sr.runExperimentWholeCorpus();
         			}
         		}
         	}
