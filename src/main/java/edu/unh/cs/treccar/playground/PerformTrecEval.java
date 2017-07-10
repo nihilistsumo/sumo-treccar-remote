@@ -12,11 +12,11 @@ import java.util.HashSet;
 
 public class PerformTrecEval {
 	public static final String TRECEVAL_DIR = "/home/sumanta/Documents/trec_eval.9.0";
-	public static final String GT_PATH = "/home/sumanta/Documents/new_research/unh/test200-v1.4/all.test200.cbor.toplevel.qrels";
+	public static final String GT_PATH = "/home/sumanta/Documents/new_research/unh/test200-v1.4/all.test200.cbor.article.qrels";
 	
 	public static void main(String[] args){
 		String workDir = "/home/sumanta/Documents/new_research/unh/test200-v1.4results/custom_lda_and_km_results";
-		String assign_filename = "garbage_trec";
+		String assign_filename = "tmk0w_trec";
 		PerformTrecEval pte = new PerformTrecEval();
 		HashSet<String> runids = pte.getRunIDs(workDir+"/"+assign_filename);
 		String tempFilepath = workDir+"/temp";
@@ -25,13 +25,19 @@ public class PerformTrecEval {
 			try {
 				Process pr = new ProcessBuilder(PerformTrecEval.TRECEVAL_DIR+"/trec_eval", PerformTrecEval.GT_PATH, tempFilepath).start();
 				InputStream is = pr.getInputStream();
+				InputStream erris = pr.getErrorStream();
 				InputStreamReader isr = new InputStreamReader(is);
+				InputStreamReader errisr = new InputStreamReader(erris);
 				BufferedReader br = new BufferedReader(isr);
-				String line;
+				BufferedReader errbr = new BufferedReader(errisr);
+				String line, errline;
 				while ((line = br.readLine()) != null) {
 					System.out.print(line.split("\t")[2]+" ");
 				}
 				System.out.println();
+				while ((errline = errbr.readLine()) != null) {
+					System.out.println("Error message from script: "+errline);
+				}
 			} catch (IOException e) {
 				// TODO Auto-generated catch block
 				e.printStackTrace();

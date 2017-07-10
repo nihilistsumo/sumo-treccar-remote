@@ -57,7 +57,7 @@ public class CustomLDA implements Serializable {
 	protected double beta;   // Prior on per-topic multinomial distribution over words
 	protected double betaSum;
 	public static final double DEFAULT_BETA = 0.01;
-	public static final double BETA_NOM = 200.0; // if beta<0 then beta = BETA_NOM/V
+	public static final double BETA_SUM = 260; // if beta<0 then beta = BETA_NOM/V
 	public static final double LAMBDA = 0.9; // for smoothing in UMM
 	
 	// An array to put the topic counts for the current document. 
@@ -151,7 +151,7 @@ public class CustomLDA implements Serializable {
 		numTypes = alphabet.size();
 		
 		if(beta<0)
-			beta = CustomLDA.BETA_NOM/numTypes;
+			beta = CustomLDA.BETA_SUM/numTypes;
 		betaSum = beta * numTypes;
 		
 		typeTopicCounts = new int[numTypes][numTopics];
@@ -627,7 +627,7 @@ public class CustomLDA implements Serializable {
 		numTypes = alphabet.size();
 		
 		if(beta<0)
-			beta = CustomLDA.BETA_NOM/numTypes;
+			beta = CustomLDA.BETA_SUM/numTypes;
 		betaSum = beta * numTypes;
 
 		typeTopicCounts = new int[numTypes][numTopics];

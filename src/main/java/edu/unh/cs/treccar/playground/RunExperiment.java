@@ -6,8 +6,8 @@ import com.trolltech.qt.gui.*;
 
 public class RunExperiment {
 	
-	public static final String CLUSTERING_MEASURE_FILENAME = "garbage";
-	public static final String TRECEVAL_ASSIGN_FILENAME = "garbage_trec";
+	public static final String CLUSTERING_MEASURE_FILENAME = "tmk0w";
+	public static final String TRECEVAL_ASSIGN_FILENAME = "tmk0w_trec";
 	public static final boolean RUN_BY_PAGE = false;
 	
 	public static void main(String[] args) {
@@ -32,22 +32,24 @@ public class RunExperiment {
         sr.runExperiment();
         */
         String model = "1";
+        // 1 for LDA, 2 for kmeans
         String tw = "0"; // currently ignored
-        String startK="200", startIter="30", startAlpha="1.3", startBeta="-1"; // treat Alpha as AplphaSum
+        String startK="0", startIter="100", startAlpha="1.0", startBeta="-1"; 
+        // treat Alpha as AplphaSum; if beta < 0, then betaSum will be CustomLDA.BETA_SUM
         String stopK=startK, stopIter=startIter, stopAlpha=startAlpha, stopBeta=startBeta;
         String stepK="1", stepIter="1", stepAlpha="1", stepBeta="1";
         boolean[] isVar = {false, false, false, false};
         if(isVar[0]){
-        	stopK = "10";
+        	stopK = "20";
         	stepK = "1";
         }
         if(isVar[1]){
-        	stopIter = "100";
-        	stepIter = "10";
+        	stopIter = "90";
+        	stepIter = "5";
         }
         if(isVar[2]){
-        	stopAlpha = "4.5";
-        	stepAlpha = "0.4";
+        	stopAlpha = "5.0";
+        	stepAlpha = "0.05";
         }
         if(isVar[3]){
         	stopBeta = "1";

@@ -8,6 +8,7 @@ import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.DoubleSummaryStatistics;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -16,7 +17,9 @@ import java.util.Random;
 import java.util.Set;
 import java.util.regex.Pattern;
 
+import cc.mallet.cluster.Clustering;
 import cc.mallet.pipe.CharSequence2TokenSequence;
+import cc.mallet.pipe.FeatureSequence2FeatureVector;
 import cc.mallet.pipe.Input2CharSequence;
 import cc.mallet.pipe.Pipe;
 import cc.mallet.pipe.SerialPipes;
@@ -27,8 +30,12 @@ import cc.mallet.topics.TopicAssignment;
 import cc.mallet.topics.TopicInferencer;
 import cc.mallet.types.Instance;
 import cc.mallet.types.InstanceList;
+import cc.mallet.types.Metric;
+import cc.mallet.types.NormalizedDotProductMetric;
+import cc.mallet.types.SparseVector;
 import co.nstant.in.cbor.CborException;
 import edu.unh.cs.treccar.Data;
+import edu.unh.cs.treccar.playground.cluster.CustomKMeans;
 import edu.unh.cs.treccar.playground.topics.CustomLDA;
 import edu.unh.cs.treccar.playground.topics.CustomTopicInferencer;
 import edu.unh.cs.treccar.read_data.DeserializeData;
@@ -78,9 +85,11 @@ public class SingleRun {
 		int[] luckyPageids = {5, 25, 35};
 		int pageid = -1;
 		for(Data.Page page:this.pageList){
+			/*
 			pageid++;
 			if(pageid!=luckyPageids[0] && pageid!=luckyPageids[1] && pageid!=luckyPageids[2])
 				continue;
+			*/
 			String pageID = page.getPageId();
 			System.out.println("PAGE ID: "+pageID);
 			ArrayList<String> paraIDs = this.articleParaMap.get(pageID);
@@ -147,14 +156,14 @@ public class SingleRun {
 		}
 		double sumRAND = 0,sumSqrDev = 0, meanRAND, stdDevRAND, stderrRAND;
 		for(Double randVal:pageRAND.values()){
-			// We may have some null rand values for which rand index could not be computed
+			// We may have some null rand values ( = -99) for which rand index could not be computed
 			// (e.g. nom=0.0, denom=0.0), we simply dont add them in our final calc
-			if(randVal!=null)
+			if(randVal>-1.01)
 				sumRAND+=randVal;
 		}
 		meanRAND = sumRAND/pageRAND.size();
 		for(Double randVal:pageRAND.values())
-			if(randVal!=null)
+			if(randVal>-1.01)
 				sumSqrDev+=Math.pow(randVal - meanRAND, 2);
 		stdDevRAND = Math.sqrt((sumSqrDev/pageRAND.size()));
 		stderrRAND = stdDevRAND/Math.sqrt(pageRAND.size());
@@ -190,6 +199,7 @@ public class SingleRun {
 		InstanceList paraIList = convertParasToIList(this.paraList);
 		InstanceList qIList = convertQueriesToIList(queryids);
 		resultForCorpus.put(corpus.getPageId(), getAssignment(paraIList, qIList, corpus));
+		HashMap<String, ArrayList<String>> currQParaAssign = resultForCorpus.get(corpus.getPageId()).getQueryParaAssignment();
 		
 		// Measure performance from resultPerPageID and store result
 		MeasureExperiment me = new MeasureExperiment(resultForCorpus, corpusGT);
@@ -200,6 +210,15 @@ public class SingleRun {
 			FileWriter fw = new FileWriter(this.outputPath+"/"+RunExperiment.CLUSTERING_MEASURE_FILENAME, true);
 			fw.write(this.k+" "+this.numIter+" "+this.model+" "+this.tw+" "+this.alphaSum+" "+this.beta+" "+randCorpus+" 0 "+purityCorpus+" 0\n");
 			fw.close();
+			
+			String runid = "runWholeCorpus"+this.k+this.numIter+this.model+this.tw+this.alphaSum+this.beta;
+			FileWriter fw2 = new FileWriter(this.outputPath+"/"+RunExperiment.TRECEVAL_ASSIGN_FILENAME, true);	
+			for(String q:currQParaAssign.keySet()){
+				ArrayList<String> candParaIDs = currQParaAssign.get(q);
+				for(String para:candParaIDs)
+					fw2.write(q.split("/")[1]+" 0 "+para+" 0 1 "+runid+"\n");
+			}
+			fw2.close();
 		} catch (IOException e) {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
@@ -244,10 +263,10 @@ public class SingleRun {
 			}
 			CustomLDA lda = new CustomLDA(numTopics, this.alphaSum, this.beta);
 			try {
-				//lda.addInstances(paraIList);
-				//lda.sample(this.numIter);
-				lda.addInstancesUnigram(paraIList);
-				lda.sampleUMM(this.numIter);
+				lda.addInstances(paraIList);
+				lda.sample(this.numIter);
+				//lda.addInstancesUnigram(paraIList);
+				//lda.sampleUMM(this.numIter);
 				//System.out.println(lda.topWords(10));
 				result = assignUsingLDA(paraIList, queryIList, lda, currPage);
 				
@@ -258,7 +277,25 @@ public class SingleRun {
 			break;
 		case 2:
 			//cluster
-			System.out.println("Cluster not implemented yet!");
+			int numClusters;
+			if(this.k==0){
+				if(queryIList.size()<paraIList.size())
+					numClusters = queryIList.size();
+				else
+					numClusters = paraIList.size();
+				System.out.println("K "+numClusters);
+			} else{
+				if(this.k>=paraIList.size()){
+					numClusters = paraIList.size();
+					System.out.println("K "+numClusters);
+				} else{
+					numClusters = this.k;
+					System.out.println("K "+numClusters);
+				}
+			}
+			CustomKMeans kmeans = new CustomKMeans(paraIList.getPipe(), numClusters, new NormalizedDotProductMetric(), CustomKMeans.EMPTY_DROP);
+			//ArrayList<ArrayList<String>> clusters = formatClusterData(kmeans.cluster(paraIList));
+			result = assignUsingKMeans(paraIList, queryIList, kmeans.cluster(paraIList), kmeans, currPage);
 			break;
 		case 99:
 			//random
@@ -397,6 +434,66 @@ public class SingleRun {
 		r.setParaClusters(getParasClustersFromMatrix(paraTopicProbMatrix, paraIList, lda.getNumTopics()));
 		return r;
 	}
+	private ResultForPage assignUsingKMeans(InstanceList paraIList, InstanceList queryIList, 
+			Clustering clusters, CustomKMeans kmeans, Data.Page page){
+		ResultForPage r = new ResultForPage();
+		HashMap<Instance, ArrayList<Instance>> insAssign = new HashMap<Instance, ArrayList<Instance>>();
+		double[][] queryClusterDistMat = getQueryClusterDistances(queryIList, clusters, kmeans, new NormalizedDotProductMetric());
+		boolean[] isClusterAssigned = new boolean[clusters.getNumClusters()];
+		for(int i=0; i<isClusterAssigned.length; i++)
+			isClusterAssigned[i] = false;
+		while(hasFalse(isClusterAssigned)){
+			int qIndex=0, cIndex=0;
+			double minVal=9999999.0, val;
+			for(int i=0; i<queryClusterDistMat.length; i++){
+				for(int j=0; j<queryClusterDistMat[0].length; j++){
+					val = queryClusterDistMat[i][j];
+					if(val>0 && val<minVal){
+						minVal = val;
+						qIndex = i;
+						cIndex = j;
+					}
+				}
+			}
+			insAssign.put(queryIList.get(qIndex), clusters.getCluster(clusters.getLabel(cIndex)));
+			for(int i=0; i<queryClusterDistMat.length; i++)
+				queryClusterDistMat[i][cIndex] = -1;
+			isClusterAssigned[cIndex] = true;
+		}
+		HashMap<String, ArrayList<String>> assignment = convInsAssignToIDAssign(insAssign, page);
+		r.setQueryParaAssignment(assignment);
+		r.setParaClusters(formatClusterData(clusters));
+		return r;
+	}
+	private boolean hasFalse(boolean[] boolArray){
+		for(int i=0; i<boolArray.length; i++){
+			if(!boolArray[i])
+				return true;
+		}
+		return false;
+	}
+	private double[][] getQueryClusterDistances(InstanceList querylist, Clustering clusters, CustomKMeans kmeans, Metric metric){
+		double[][] distanceMatrix = new double[querylist.size()][clusters.getNumClusters()];
+		ArrayList<SparseVector> clusterMeans = kmeans.getClusterMeans();
+		Instance query;
+		for(int q=0; q<distanceMatrix.length; q++){
+			for(int c=0; c<distanceMatrix[0].length; c++)
+				distanceMatrix[q][c] = 
+				metric.distance(clusterMeans.get(c), (SparseVector) querylist.get(q).getData());
+		}
+		return distanceMatrix;
+	}
+	private ArrayList<ArrayList<String>> formatClusterData(Clustering rawClusterData){
+		ArrayList<ArrayList<String>> finalClusterData = new ArrayList<ArrayList<String>>();
+		for(InstanceList iList : rawClusterData.getClusters()){
+			ArrayList<String> paraIDList = new ArrayList<String>();
+			for(Instance i : iList){
+				paraIDList.add(i.getName().toString());
+			}
+			finalClusterData.add(paraIDList);
+		}
+		return finalClusterData;
+	}
 	private ArrayList<ArrayList<String>> getParasClustersFromMatrix(double[][] paraTopicMatrix, InstanceList pIList, int numTopics) throws Exception{
 		ArrayList<ArrayList<String>> clusters = new ArrayList<ArrayList<String>>();
 		for(int topicPos=0; topicPos<numTopics; topicPos++)
@@ -429,7 +526,7 @@ public class SingleRun {
 		return result;
 	}
 	private InstanceList convertQueriesToIList(ArrayList<String> queries){
-		InstanceList qIList = new InstanceList(SingleRun.buildPipe());
+		InstanceList qIList = new InstanceList(SingleRun.buildPipe(this.model));
 		for(String q:queries){
 			Instance secIns = new Instance(q.replaceAll("%20|/", " "), null, q, q);
 			qIList.addThruPipe(secIns);
@@ -437,7 +534,7 @@ public class SingleRun {
 		return qIList;
 	}
 	private InstanceList convertParasToIList(ArrayList<Data.Paragraph> paraObjs){
-		InstanceList iListPara = new InstanceList(SingleRun.buildPipe());
+		InstanceList iListPara = new InstanceList(SingleRun.buildPipe(this.model));
 		for(Data.Paragraph paraObj:paraObjs){
 			Instance paraIns = new Instance(paraObj.getTextOnly(), null, paraObj.getParaId(), paraObj.getTextOnly());
 			iListPara.addThruPipe(paraIns);
@@ -537,7 +634,14 @@ public class SingleRun {
 		}
 		return gtMap;
 	}
-	public static Pipe buildPipe(){
+	public static Pipe buildPipe(int model){
+		if(model==1)
+			return buildPipeForLDA();
+		else
+			return buildPipeDefault();
+			
+	}
+	public static Pipe buildPipeForLDA(){
 		ArrayList pipeList = new ArrayList();
 
         // Read data from File objects
@@ -574,6 +678,49 @@ public class SingleRun {
         // Now convert the sequence of features to a sparse vector,
         //  mapping feature IDs to counts.
         //pipeList.add(new FeatureSequence2FeatureVector());
+        
+        // Print out the features and the label
+        //pipeList.add(new PrintInputAndTarget());
+        
+        return (new SerialPipes(pipeList));
+	}
+	public static Pipe buildPipeDefault(){
+		ArrayList pipeList = new ArrayList();
+
+        // Read data from File objects
+        pipeList.add(new Input2CharSequence("UTF-8"));
+
+        // Regular expression for what constitutes a token.
+        //  This pattern includes Unicode letters, Unicode numbers, 
+        //   and the underscore character. Alternatives:
+        //    "\\S+"   (anything not whitespace)
+        //    "\\w+"    ( A-Z, a-z, 0-9, _ )
+        //    "[\\p{L}\\p{N}_]+|[\\p{P}]+"   (a group of only letters and numbers OR
+        //                                    a group of only punctuation marks)
+        Pattern tokenPattern = Pattern.compile("[\\p{L}\\p{N}_]+");
+
+        // Tokenize raw strings
+        pipeList.add(new CharSequence2TokenSequence(tokenPattern));
+
+        // Normalize all tokens to all lowercase
+        pipeList.add(new TokenSequenceLowercase());
+
+        // Remove stopwords from a standard English stoplist.
+        //  options: [case sensitive] [mark deletions]
+        pipeList.add(new TokenSequenceRemoveStopwords(false, false));
+
+        // Rather than storing tokens as strings, convert 
+        //  them to integers by looking them up in an alphabet.
+        pipeList.add(new TokenSequence2FeatureSequence());
+
+        // Do the same thing for the "target" field: 
+        //  convert a class label string to a Label object,
+        //  which has an index in a Label alphabet.
+        //pipeList.add(new Target2Label());
+
+        // Now convert the sequence of features to a sparse vector,
+        //  mapping feature IDs to counts.
+        pipeList.add(new FeatureSequence2FeatureVector());
         
         // Print out the features and the label
         //pipeList.add(new PrintInputAndTarget());
