@@ -37,7 +37,8 @@ import co.nstant.in.cbor.CborException;
 import edu.unh.cs.treccar.Data;
 import edu.unh.cs.treccar.playground.cluster.CustomKMeans;
 import edu.unh.cs.treccar.playground.topics.CustomLDA;
-import edu.unh.cs.treccar.playground.topics.CustomTopicInferencer;
+import edu.unh.cs.treccar.playground.topics.UnigramTopicInferencer;
+import edu.unh.cs.treccar.playground.topics.UnigramTopicModel;
 import edu.unh.cs.treccar.read_data.DeserializeData;
 import edu.unh.cs.treccar.read_data.DeserializeData.RuntimeCborException;
 
@@ -297,6 +298,50 @@ public class SingleRun {
 			//ArrayList<ArrayList<String>> clusters = formatClusterData(kmeans.cluster(paraIList));
 			result = assignUsingKMeans(paraIList, queryIList, kmeans.cluster(paraIList), kmeans, currPage);
 			break;
+		case 3:
+			//unigram topic
+			int numTopicsUMM;
+			if(this.k==0){
+				/*
+				if(queryIList.size()>paraIList.size()){
+					numTopics = paraIList.size();
+					System.out.println("K was "+queryIList.size()+", but we've reduced it to be paralist size "+numTopics);
+				} else{
+					numTopics = queryIList.size();
+					System.out.println("K "+numTopics);
+				}
+				*/
+				numTopicsUMM = queryIList.size();
+				System.out.println("K "+numTopicsUMM);
+			} else{
+				/*
+				if(this.k>paraIList.size()){
+					numTopics = paraIList.size();
+					System.out.println("K was "+this.k+", but we've reduced it to be paralist size "+numTopics);
+				} else{
+					numTopics = this.k;
+					System.out.println("K "+numTopics);
+				}
+				*/
+				if(this.k>=paraIList.size()){
+					numTopicsUMM = paraIList.size();
+					System.out.println("K "+numTopicsUMM);
+				} else{
+					numTopicsUMM = this.k;
+					System.out.println("K "+numTopicsUMM);
+				}
+			}
+			UnigramTopicModel ummlda = new UnigramTopicModel(numTopicsUMM, this.alphaSum, this.beta);
+			try {
+				ummlda.addInstances(paraIList);
+				ummlda.sample(this.numIter);
+				result = assignUsingUMM(paraIList, queryIList, ummlda, currPage);
+				
+			} catch (Exception e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+			break;
 		case 99:
 			//random
 			result = assignUsingRandom(paraIList, queryIList, currPage);
@@ -434,6 +479,81 @@ public class SingleRun {
 		r.setParaClusters(getParasClustersFromMatrix(paraTopicProbMatrix, paraIList, lda.getNumTopics()));
 		return r;
 	}
+	private ResultForPage assignUsingUMM(InstanceList paraIList, InstanceList queryIList, UnigramTopicModel umm, Data.Page page) throws Exception{
+		HashMap<Instance, ArrayList<Instance>> assign = new HashMap<Instance, ArrayList<Instance>>();
+		for(Instance qIns:queryIList)
+			assign.put(qIns, new ArrayList<Instance>());
+		
+		UnigramTopicInferencer inf = umm.getInferencer();
+		int numIterForInf = 30;
+		int thinningForInf = 1;
+		int burninForInf = 5;
+		int[] queryTopics = new int[queryIList.size()];
+		int[] paraTopics = new int[paraIList.size()];
+		for(int i=0; i<queryIList.size(); i++){
+			Instance queryIns = queryIList.get(i);
+			//System.out.println("Page ID: "+page.getPageId());
+			int currQueryTopicProbDist = inf.inferInstanceTopic(queryIns, numIterForInf, thinningForInf, burninForInf);
+			queryTopics[i] = currQueryTopicProbDist;
+		}
+		if(paraIList.size()!=umm.getData().size())
+			throw new Exception("paralist size and lda topic assignment size dont match!");
+		for(int j=0; j<paraIList.size(); j++){
+			// Following if block ensures that we are picking the correct topic dist for current para instance
+			if(paraIList.get(j).getName()!=umm.getData().get(j).instance.getName())
+				throw new Exception("paraIList indices are not following the same order as ummlda instances");
+			paraTopics[j] = umm.getTopicOfInstance(j);
+		}
+		boolean[] isParaAssigned = new boolean[paraIList.size()];
+		for(int pos=0; pos<isParaAssigned.length; pos++)
+			isParaAssigned[pos] = false;
+		/*for(int m=0; m<queryIList.size(); m++){
+			Instance queryIns = queryIList.get(m);
+			int bestParaInsIndex = 0;
+			double minKLDiv = 99999.0;
+			for(int n=0; n<paraIList.size(); n++){
+				if(!isParaAssigned[n]){
+					double currKLDiv = getKLdiv(queryTopicProbMatrix[m], paraTopicProbMatrix[n]);
+					if(currKLDiv<minKLDiv){
+						minKLDiv = currKLDiv;
+						bestParaInsIndex = n;
+					}
+				}
+			}
+			assign.get(queryIns).add(paraIList.get(bestParaInsIndex));
+			isParaAssigned[bestParaInsIndex] = true;
+		}
+		for(int p=0; p<paraIList.size(); p++){
+			if(!isParaAssigned[p]){
+				Instance bestQueryIns = queryIList.get(0);
+				double minKLDiv = 99999.0;
+				for(int q=0; q<queryIList.size(); q++){
+					double currKLDiv = getKLdiv(queryTopicProbMatrix[q], paraTopicProbMatrix[p]);
+					if(currKLDiv<minKLDiv){
+						minKLDiv = currKLDiv;
+						bestQueryIns = queryIList.get(q);
+					}
+				}
+				assign.get(bestQueryIns).add(paraIList.get(p));
+			}
+		}*/
+		for(int q=0; q<queryTopics.length; q++){
+			Instance currQIns = queryIList.get(q);
+			for(int p=0; p<paraTopics.length; p++){
+				if(!isParaAssigned[p]){
+					if(queryTopics[q]==paraTopics[p]){
+						assign.get(currQIns).add(paraIList.get(p));
+						isParaAssigned[p] = true;
+					}
+				}
+			}
+		}
+		HashMap<String, ArrayList<String>> assignment = convInsAssignToIDAssign(assign, page);
+		ResultForPage r = new ResultForPage();
+		r.setQueryParaAssignment(assignment);
+		r.setParaClusters(getParasClustersFromParatopics(paraTopics, paraIList, umm.getNumTopics()));
+		return r;
+	}
 	private ResultForPage assignUsingKMeans(InstanceList paraIList, InstanceList queryIList, 
 			Clustering clusters, CustomKMeans kmeans, Data.Page page){
 		ResultForPage r = new ResultForPage();
@@ -512,6 +632,16 @@ public class SingleRun {
 				}
 			}
 			clusters.get(maxTopicIndex).add(p.getName().toString());
+		}
+		return clusters;
+	}
+	private ArrayList<ArrayList<String>> getParasClustersFromParatopics(int[] paraTopics, InstanceList pIList, int numTopics){
+		ArrayList<ArrayList<String>> clusters = new ArrayList<ArrayList<String>>();
+		for(int topicPos=0; topicPos<numTopics; topicPos++)
+			clusters.add(new ArrayList<String>());
+		for(int paraIndex=0; paraIndex<paraTopics.length; paraIndex++){
+			Instance p = pIList.get(paraIndex);
+			clusters.get(paraTopics[paraIndex]).add(p.getName().toString());
 		}
 		return clusters;
 	}
@@ -635,7 +765,7 @@ public class SingleRun {
 		return gtMap;
 	}
 	public static Pipe buildPipe(int model){
-		if(model==1)
+		if(model==1 || model==3)
 			return buildPipeForLDA();
 		else
 			return buildPipeDefault();

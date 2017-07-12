@@ -1,10 +1,3 @@
-/* Copyright (C) 2005 Univ. of Massachusetts Amherst, Computer Science Dept.
-   This file is part of "MALLET" (MAchine Learning for LanguagE Toolkit).
-   http://www.cs.umass.edu/~mccallum/mallet
-   This software is provided under the terms of the Common Public License,
-   version 1.0, as published by http://www.opensource.org.	For further
-   information, see the file `LICENSE' included with this distribution. */
-
 package edu.unh.cs.treccar.playground.topics;
 
 import java.util.*;
@@ -17,19 +10,9 @@ import cc.mallet.topics.*;
 import cc.mallet.types.*;
 import cc.mallet.util.*;
 
+public class UnigramTopicModel implements Serializable {
 
-/**
- * A simple implementation of Latent Dirichlet Allocation using Gibbs sampling.
- * This code is slower than the regular Mallet LDA implementation, but provides a 
- *  better starting place for understanding how sampling works and for 
- *  building new topic models.
- * 
- * @author David Mimno, Andrew McCallum
- */
-
-public class CustomLDA implements Serializable {
-
-	private static Logger logger = MalletLogger.getLogger(CustomLDA.class.getName());
+	private static Logger logger = MalletLogger.getLogger(UnigramTopicModel.class.getName());
 	
 	// the training instances and their topic assignments
 	protected ArrayList<TopicAssignment> data;  
@@ -52,13 +35,13 @@ public class CustomLDA implements Serializable {
 	protected int numTypes;
 
 	// Prior parameters
-	protected double alpha;	 // Dirichlet(alpha,alpha,...) is the distribution over topics
-	protected double alphaSum;
+	//protected double alpha;	 // Dirichlet(alpha,alpha,...) is the distribution over topics
+	//protected double alphaSum;
 	protected double beta;   // Prior on per-topic multinomial distribution over words
 	protected double betaSum;
 	public static final double DEFAULT_BETA = 0.01;
 	public static final double BETA_SUM = 260; // if beta<0 then beta = BETA_NOM/V
-	public static final double LAMBDA = 0.9; // for smoothing in UMM
+	public static final double LAMBDA = 1.0; // for smoothing in UMM
 	
 	// An array to put the topic counts for the current document. 
 	// Initialized locally below.  Defined here to avoid
@@ -78,11 +61,11 @@ public class CustomLDA implements Serializable {
 	protected boolean printLogLikelihood = false;
 	protected boolean printMessages = false;
 	
-	public CustomLDA (int numberOfTopics) {
+	public UnigramTopicModel (int numberOfTopics) {
 		this (numberOfTopics, numberOfTopics, DEFAULT_BETA);
 	}
 	
-	public CustomLDA (int numberOfTopics, double alphaSum, double beta) {
+	public UnigramTopicModel (int numberOfTopics, double alphaSum, double beta) {
 		this (numberOfTopics, alphaSum, beta, new Randoms());
 	}
 	
@@ -93,18 +76,18 @@ public class CustomLDA implements Serializable {
 		return ret;
 	}
 	
-	public CustomLDA (int numberOfTopics, double alphaSum, double beta, Randoms random) {
+	public UnigramTopicModel (int numberOfTopics, double alphaSum, double beta, Randoms random) {
 		this (newLabelAlphabet (numberOfTopics), alphaSum, beta, random);
 	}
 	
-	public CustomLDA (LabelAlphabet topicAlphabet, double alphaSum, double beta, Randoms random)
+	public UnigramTopicModel (LabelAlphabet topicAlphabet, double alphaSum, double beta, Randoms random)
 	{
 		this.data = new ArrayList<TopicAssignment>();
 		this.topicAlphabet = topicAlphabet;
 		this.numTopics = topicAlphabet.size();
 
-		this.alphaSum = alphaSum;
-		this.alpha = alphaSum / numTopics;
+		//this.alphaSum = alphaSum;
+		//this.alpha = alphaSum / numTopics;
 		this.beta = beta;
 		this.random = random;
 		
@@ -145,6 +128,18 @@ public class CustomLDA implements Serializable {
 	public int[][] getTypeTopicCounts() { return typeTopicCounts; }
 	public int[] getTopicTotals() { return tokensPerTopic; }
 
+	public UnigramTopicInferencer getInferencer(){
+		UnigramTopicInferencer inf = new UnigramTopicInferencer(this.typeTopicCounts, this.tokensPerTopic, 
+				this.alphabet, UnigramTopicModel.BETA_SUM);
+		return inf;
+	}
+	
+	public int getTopicOfInstance(int instanceIndex){
+		// equivalent to getTopicProbabilities() of CustomLDA
+		return this.topicDocSequence[instanceIndex];
+	}
+	
+	// addInstances method for unigram style //
 	public void addInstances (InstanceList training) {
 
 		alphabet = training.getDataAlphabet();
@@ -153,35 +148,40 @@ public class CustomLDA implements Serializable {
 		if(beta<0)
 			beta = CustomLDA.BETA_SUM/numTypes;
 		betaSum = beta * numTypes;
-		
+
 		typeTopicCounts = new int[numTypes][numTopics];
 		initTypeTopicCounts();
+		topicDocSequence = new int[training.size()];
 
 		int doc = 0;
 
 		for (Instance instance : training) {
-			doc++;
-
 			FeatureSequence tokens = (FeatureSequence) instance.getData();
 			LabelSequence topicSequence =
-				new LabelSequence(topicAlphabet, new int[ tokens.size() ]);
-			
-			int[] topics = topicSequence.getFeatures();
-			for (int position = 0; position < tokens.size(); position++) {
+					new LabelSequence(topicAlphabet, new int[ tokens.size() ]);
 
-				int topic = random.nextInt(numTopics);
+			int[] topics = topicSequence.getFeatures();
+			int topic = random.nextInt(numTopics);
+			topicDocSequence[doc] = topic;
+			for (int position = 0; position < tokens.size(); position++) {
 				topics[position] = topic;
 				tokensPerTopic[topic]++;
-				
+
 				int type = tokens.getIndexAtPosition(position);
-				//typeTopicCounts[type][topic]++;
-				typeTopicCounts[type][topic] += topicMask+1;
+				typeTopicCounts[type][topic]+=topicMask+1;
 			}
 
 			TopicAssignment t = new TopicAssignment (instance, topicSequence);
 			data.add (t);
+			doc++;
 		}
-
+	}
+	
+	private void initTypeTopicCounts(){
+		for(int type=0; type<numTypes; type++){
+			for(int topic=0; topic<numTopics; topic++)
+				typeTopicCounts[type][topic] = topic;
+		}
 	}
 	
 	public void sample (int iterations) throws IOException {
@@ -189,7 +189,12 @@ public class CustomLDA implements Serializable {
 		for (int iteration = 1; iteration <= iterations; iteration++) {
 
 			long iterationStart = System.currentTimeMillis();
-
+			if(printMessages){
+				System.out.print("Iteration "+iteration+", topicDocSeq array=[");
+				for(int doci=0; doci<topicDocSequence.length; doci++)
+					System.out.print(topicDocSequence[doci]+" ");
+				System.out.print("]\n");
+			}
 			// Loop over every document in the corpus
 			for (int doc = 0; doc < data.size(); doc++) {
 				FeatureSequence tokenSequence =
@@ -197,92 +202,137 @@ public class CustomLDA implements Serializable {
 				LabelSequence topicSequence =
 					(LabelSequence) data.get(doc).topicSequence;
 
-				sampleTopicsForOneDoc (tokenSequence, topicSequence);
+				sampleTopicsForOneDoc (tokenSequence, topicSequence, doc);
+				if(printMessages){
+					System.out.print("Para "+doc+" topic seq: [");
+					for(int i=0; i<data.get(doc).topicSequence.getLength(); i++){
+						System.out.print(data.get(doc).topicSequence.getIndexAtPosition(i)+" ");
+					}
+					System.out.print("]\n");
+				}
+				
 			}
 		
             long elapsedMillis = System.currentTimeMillis() - iterationStart;
 			logger.fine(iteration + "\t" + elapsedMillis + "ms\t");
 
+			/*
 			// Occasionally print more information
 			if (showTopicsInterval != 0 && iteration % showTopicsInterval == 0) {
 				logger.info("<" + iteration + "> Log Likelihood: " + modelLogLikelihood() + "\n" +
 							topWords (wordsPerTopic));
 			}
+			*/
 
 		}
 	}
 	
-	protected void sampleTopicsForOneDoc (FeatureSequence tokenSequence,
-										  FeatureSequence topicSequence) {
-
+	protected void sampleTopicsForOneDoc (FeatureSequence tokenSequence, LabelSequence topicSequence,
+			  int docIndex) {
+		int oldDocTopic = topicDocSequence[docIndex];
+		
+		int newTopic;
+		int docLength = tokenSequence.getLength(); // T
+		
+		for(int position=0; position<docLength; position++){
+			int currType = tokenSequence.getIndexAtPosition(position);
+			typeTopicCounts[currType][oldDocTopic]-=topicMask+1;
+		}
+		// now typeTopicCounts is n_{k,-i}^(t)
+		tokensPerTopic[oldDocTopic]-=docLength;
+		// now tokensPerTopic is tc_{k,-i}
+		topicDocSequence[docIndex] = -1;
+		
+		double[] topicScores = new double[numTopics];
+		double[] smoothedScores = new double[numTopics];
+		double[] logpkList = new double[numTopics];
+		double topicScoreSum = 0, normalizingC, currentMin, currentMax, minLog, maxLog;
+		
+		//-- p'(k) distribution is calculated in log space with normalization --//
+		
+		if(printMessages)
+			System.out.println("beta="+beta+", betaSum="+betaSum+", V="+numTypes);
+		for(int k=0; k<numTopics; k++){
+			double sumOfLog = 0, logOfpk;
+			for(int pos=0; pos<docLength; pos++)
+				sumOfLog+=Math.log((typeTopicCounts[tokenSequence.getIndexAtPosition(pos)][k]>>topicBits)+beta);
+			logpkList[k] = sumOfLog-docLength*Math.log(tokensPerTopic[k]+betaSum);
+			
+		}
+		minLog = logpkList[0];
+		maxLog = logpkList[0];
+		for(int k=0; k<numTopics; k++){
+			currentMin = logpkList[k];
+			currentMax = logpkList[k];
+			if(currentMin<minLog)
+				minLog = currentMin;
+			if(currentMax>maxLog)
+				maxLog = currentMax;
+		}
+		normalizingC = (minLog+maxLog)/2;
+		if(printMessages){
+			System.out.println("minLog="+minLog+", maxLog="+maxLog);
+			System.out.println("Normalizing C="+normalizingC);
+		}
+		for(int k=0; k<numTopics; k++){	
+			topicScores[k] = Math.exp(logpkList[k]-normalizingC);
+			topicScoreSum+=topicScores[k];
+		}
+		for(int k=0; k<numTopics; k++){
+			topicScores[k] = topicScores[k]/topicScoreSum;
+			if(printMessages)
+				System.out.println("log p'("+k+")="+logpkList[k]+", topicScore("+k+")="+topicScores[k]);
+		}
+		
+		
+		//------------------------------------------------------------------//
+		
+		//-- p'(k) distribution is calculated directly without any normalization --//
+		
+		/*
+		for(int k=0; k<numTopics; k++){
+			double prod = 1.0;
+			for(int t=0; t<docLength; t++)
+				prod*=((typeTopicCounts[t][k]>>topicBits)+beta)/(tokensPerTopic[k]+betaSum);
+			topicScores[k] = prod;
+			topicScoreSum+=topicScores[k];
+		}
+		*/
+		
+		//-------------------------------------------------------------------------//
+		double sumSmooth = numTopics-(numTopics-1)*CustomLDA.LAMBDA;
+		for(int k=0; k<numTopics; k++){
+			smoothedScores[k] = (CustomLDA.LAMBDA*topicScores[k]+(1-CustomLDA.LAMBDA))/sumSmooth;
+			if(printMessages)
+				System.out.println("smoothedScore("+k+")="+smoothedScores[k]);
+		}
+		//double sample = random.nextUniform()*topicScoreSum;
+		double sample = random.nextUniform();
+		if(printMessages)
+			System.out.println("Sample="+sample);
+		newTopic = -1;
+		while (sample > 0.0) {
+			newTopic++;
+			sample -= smoothedScores[newTopic];
+		}
+		if(newTopic==-1)
+			throw new IllegalStateException("New topic not sampled");
+		if(printMessages)
+			System.out.println("New topic="+newTopic);
 		int[] oneDocTopics = topicSequence.getFeatures();
-
-		int[] currentTypeTopicCounts;
-		int type, oldTopic, newTopic;
-		double topicWeightsSum;
-		int docLength = tokenSequence.getLength();
-
-		int[] localTopicCounts = new int[numTopics];
-
-		//		populate topic counts
-		for (int position = 0; position < docLength; position++) {
-			localTopicCounts[oneDocTopics[position]]++;
-		}
-
-		double score, sum;
-		double[] topicTermScores = new double[numTopics];
-
-		//	Iterate over the positions (words) in the document 
-		for (int position = 0; position < docLength; position++) {
-			type = tokenSequence.getIndexAtPosition(position);
-			oldTopic = oneDocTopics[position];
-
-			// Grab the relevant row from our two-dimensional array
-			currentTypeTopicCounts = typeTopicCounts[type];
-
-			//	Remove this token from all counts. 
-			localTopicCounts[oldTopic]--;
-			tokensPerTopic[oldTopic]--;
-			assert(tokensPerTopic[oldTopic] >= 0) : "old Topic " + oldTopic + " below 0";
-			currentTypeTopicCounts[oldTopic]-=topicMask+1;
-
-			// Now calculate and add up the scores for each topic for this word
-			sum = 0.0;
-			
-			// Here's where the math happens! Note that overall performance is 
-			//  dominated by what you do in this loop.
-			for (int topic = 0; topic < numTopics; topic++) {
-				score =
-					(alpha + localTopicCounts[topic]) *
-					((beta + (currentTypeTopicCounts[topic] >> topicBits)) /
-					 (betaSum + tokensPerTopic[topic]));
-				sum += score;
-				topicTermScores[topic] = score;
-			}
-			
-			// Choose a random point between 0 and the sum of all topic scores
-			double sample = random.nextUniform() * sum;
-
-			// Figure out which topic contains that point
-			newTopic = -1;
-			while (sample > 0.0) {
-				newTopic++;
-				sample -= topicTermScores[newTopic];
-			}
-
-			// Make sure we actually sampled a topic
-			if (newTopic == -1) {
-				throw new IllegalStateException ("SimpleLDA: New topic not sampled.");
-			}
-
-			// Put that new topic into the counts
+		for(int position=0; position<docLength; position++){
 			oneDocTopics[position] = newTopic;
-			localTopicCounts[newTopic]++;
-			tokensPerTopic[newTopic]++;
-			currentTypeTopicCounts[newTopic]+=topicMask+1;
+			int currType = tokenSequence.getIndexAtPosition(position);
+			typeTopicCounts[currType][newTopic]+=topicMask+1;
 		}
+		// now typeTopicCounts is n_{k}^(t)
+		tokensPerTopic[newTopic]+=docLength;
+		// now tokensPerTopic is tc_{k}
+		topicDocSequence[docIndex] = newTopic;
 	}
+	private static final long serialVersionUID = 1;
 	
+	/*
 	public double modelLogLikelihood() {
 		double logLikelihood = 0.0;
 
@@ -405,12 +455,14 @@ public class CustomLDA implements Serializable {
 
 		return output.toString();
 	}
+	*/
 
 	/**
 	 *  @param file        The filename to print to
 	 *  @param threshold   Only print topics with proportion greater than this number
 	 *  @param max         Print no more than this many topics
 	 */
+	/*
 	public void printDocumentTopics (File file, double threshold, int max) throws IOException {
 		PrintWriter out = new PrintWriter(file);
 
@@ -577,53 +629,5 @@ public class CustomLDA implements Serializable {
 			tokensPerTopic[ti] = in.readInt();
 		}
 	}
-
-	public static void main (String[] args) throws IOException {
-
-		InstanceList training = InstanceList.load (new File(args[0]));
-
-		int numTopics = args.length > 1 ? Integer.parseInt(args[1]) : 200;
-
-		CustomLDA lda = new CustomLDA (numTopics, 50.0, 0.01);
-		lda.addInstances(training);
-		lda.sample(1000);
-	}
-	
-	// Custom methods: Author- Sumanta
-	public TopicInferencer getInferencer(){
-		double[] alphaVals = new double[this.numTopics];
-		for(int i=0; i<this.numTopics; i++)
-			alphaVals[i] = this.alpha;
-		TopicInferencer inf = new TopicInferencer(this.typeTopicCounts, this.tokensPerTopic, this.alphabet, alphaVals, this.beta, this.betaSum);
-		return inf;
-	}
-	public double[] getTopicProbabilities(int instanceIndex){
-		double[] topicDist = new double[this.numTopics];
-		TopicAssignment currTopicAssign = this.data.get(instanceIndex);
-		LabelSequence topicSeqForCurr = currTopicAssign.topicSequence;
-		for(int tokenPos=0; tokenPos<topicSeqForCurr.size(); tokenPos++){
-			int currTopic = topicSeqForCurr.getIndexAtPosition(tokenPos);
-			topicDist[currTopic]++;
-		}
-		
-		// Add the smoothing parameters and normalize
-		// Also here we are using same alpha for each topic
-		double sum = 0.0;
-		for (int topic = 0; topic < numTopics; topic++) {
-			topicDist[topic] += this.alpha;
-			sum += topicDist[topic];
-		}
-
-		// And normalize
-		for (int topic = 0; topic < numTopics; topic++) {
-			topicDist[topic] /= sum;
-		}
-		return topicDist;
-	}
-	private void initTypeTopicCounts(){
-		for(int type=0; type<numTypes; type++){
-			for(int topic=0; topic<numTopics; topic++)
-				typeTopicCounts[type][topic] = topic;
-		}
-	}
+	*/
 }

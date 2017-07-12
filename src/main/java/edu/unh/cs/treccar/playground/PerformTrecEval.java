@@ -12,11 +12,12 @@ import java.util.HashSet;
 
 public class PerformTrecEval {
 	public static final String TRECEVAL_DIR = "/home/sumanta/Documents/trec_eval.9.0";
-	public static final String GT_PATH = "/home/sumanta/Documents/new_research/unh/test200-v1.4/all.test200.cbor.article.qrels";
+	//public static final String GT_PATH = "/home/sumanta/Documents/new_research/unh/test200-v1.4/all.test200.cbor.article.qrels";
+	public static final String GT_PATH = "/home/sumanta/Documents/new_research/unh/test200-v1.4/all.test200.cbor.toplevel.qrels";
 	
 	public static void main(String[] args){
 		String workDir = "/home/sumanta/Documents/new_research/unh/test200-v1.4results/custom_lda_and_km_results";
-		String assign_filename = "tmk0w_trec";
+		String assign_filename = "umm_lambda_trec";
 		PerformTrecEval pte = new PerformTrecEval();
 		HashSet<String> runids = pte.getRunIDs(workDir+"/"+assign_filename);
 		String tempFilepath = workDir+"/temp";
