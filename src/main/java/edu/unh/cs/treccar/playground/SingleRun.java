@@ -116,7 +116,7 @@ public class SingleRun {
 				checkParas.addAll(paras);
 			}
 			Set<String> checkParaSet = new HashSet<String>(checkParas);
-			if(checkParaSet.size()<checkParas.size()){
+			if(checkParaSet.size()<checkParas.size() && this.model!=98){
 				try {
 					throw new Exception("Duplicate para assigned in "+page.getPageId());
 				} catch (Exception e) {
@@ -342,6 +342,10 @@ public class SingleRun {
 				e.printStackTrace();
 			}
 			break;
+		case 98:
+			//all correct
+			result = assignUsingAllCorrect(paraIList, queryIList, currPage);
+			break;
 		case 99:
 			//random
 			result = assignUsingRandom(paraIList, queryIList, currPage);
@@ -367,6 +371,36 @@ public class SingleRun {
 			idAssign.put(queryID, paraIDs);
 		}
 		return idAssign;
+	}
+	private ResultForPage assignUsingAllCorrect(InstanceList paraIList, InstanceList queryIList, Data.Page page){
+		HashMap<String, ArrayList<String>> assign = new HashMap<String, ArrayList<String>>();
+		ArrayList<ArrayList<String>> paraClusters = new ArrayList<ArrayList<String>>();
+		ResultForPage r = new ResultForPage();
+		ArrayList<String> queryIDs = new ArrayList<String>();
+		ArrayList<String> paraIDs = new ArrayList<String>();
+		for(Instance qIns:queryIList){
+			String pageid = page.getPageId();
+			String q = qIns.getName().toString();
+			if(q.equals(pageid))
+				q = pageid;
+			else
+				q = pageid+"/"+q;
+			assign.put(q, new ArrayList<String>());
+			queryIDs.add(q);
+		}
+		for(String q:queryIDs){
+			paraIDs = this.gtSecParaMap.get(q);
+			if(paraIDs==null){
+				System.out.println("No entry for query "+q+" in gt!");
+				continue;
+			}
+			assign.get(q).addAll(paraIDs);
+		}
+		for(String qry:assign.keySet())
+			paraClusters.add(assign.get(qry));
+		r.setQueryParaAssignment(assign);
+		r.setParaClusters(paraClusters);
+		return r;
 	}
 	private ResultForPage assignUsingRandom(InstanceList paraIList, InstanceList queryIList, Data.Page page){
 		Random rand = new Random();
