@@ -44,7 +44,7 @@ import edu.unh.cs.treccar.read_data.DeserializeData.RuntimeCborException;
 
 public class SingleRun {
 	int k, numIter, model, tw;
-	double alphaSum, beta;
+	double alphaSum, betaSum;
 	String paraPath, outlinePath, gtPath, articleQrelsPath, outputPath;
 	private HashMap<String, ArrayList<String>> gtSecParaMap = null;
 	private HashMap<String, ArrayList<String>> articleParaMap = null;
@@ -63,7 +63,7 @@ public class SingleRun {
 			this.model = new Integer(args[2]);
 			this.tw = new Integer(args[3]);
 			this.alphaSum = new Double(args[4]);
-			this.beta = new Double(args[5]);
+			this.betaSum = new Double(args[5]);
 			this.paraPath = args[6];
 			this.outlinePath = args[7];
 			this.gtPath = args[8];
@@ -78,7 +78,7 @@ public class SingleRun {
 					",model="+this.model+
 					",tw="+this.tw+
 					",alphaSum="+this.alphaSum+
-					",beta="+this.beta);
+					",betaSum="+this.betaSum);
 		}
 	}
 	public void runExperiment(){
@@ -127,21 +127,26 @@ public class SingleRun {
 			}
 			//-- ############################################# --//
 		}
-		
-		try{
-			String runid = "run"+this.k+this.numIter+this.model+this.tw+this.alphaSum+this.beta;
-			FileWriter fw = new FileWriter(this.outputPath+"/"+RunExperiment.TRECEVAL_ASSIGN_FILENAME, true);
-			for(String p:resultPerPageID.keySet()){
-				HashMap<String, ArrayList<String>> currQParaAssign = resultPerPageID.get(p).getQueryParaAssignment();
-				for(String q:currQParaAssign.keySet()){
-					ArrayList<String> candParaIDs = currQParaAssign.get(q);
-					for(String para:candParaIDs)
-						fw.write(q+" 0 "+para+" 0 1 "+runid+"\n");
+		if(RunExperiment.SAVE_RESULT){
+			try{
+				String runid;
+				if(this.model==3)
+					runid = "run"+this.k+this.numIter+this.model+this.betaSum+RunExperiment.SMOOTHED_UMM;
+				else
+					runid = "run"+this.k+this.numIter+this.model+this.tw+this.alphaSum+this.betaSum;
+				FileWriter fw = new FileWriter(this.outputPath+"/"+RunExperiment.TRECEVAL_ASSIGN_FILENAME, true);
+				for(String p:resultPerPageID.keySet()){
+					HashMap<String, ArrayList<String>> currQParaAssign = resultPerPageID.get(p).getQueryParaAssignment();
+					for(String q:currQParaAssign.keySet()){
+						ArrayList<String> candParaIDs = currQParaAssign.get(q);
+						for(String para:candParaIDs)
+							fw.write(q+" 0 "+para+" 0 1 "+runid+"\n");
+					}
 				}
+				fw.close();
+			} catch(IOException e){
+				e.printStackTrace();
 			}
-			fw.close();
-		} catch(IOException e){
-			e.printStackTrace();
 		}
 		// Measure performance from resultPerPageID and store result
 		MeasureExperiment me = new MeasureExperiment(resultPerPageID, this.gtSecParaMap);
@@ -180,13 +185,16 @@ public class SingleRun {
 				sumSqrDevP+=Math.pow(pVal - meanPurity, 2);
 		stdDevP = Math.sqrt((sumSqrDevP/pagePurity.size()));
 		stderrPurity = stdDevP/Math.sqrt(pagePurity.size());
-		try {
-			FileWriter fw = new FileWriter(this.outputPath+"/"+RunExperiment.CLUSTERING_MEASURE_FILENAME, true);
-			fw.write(this.k+" "+this.numIter+" "+this.model+" "+this.tw+" "+this.alphaSum+" "+this.beta+" "+meanRAND+" "+stderrRAND+" "+meanPurity+" "+stderrPurity+"\n");
-			fw.close();
-		} catch (IOException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
+		System.out.println("Mean RAND = "+meanRAND+", mean Purity = "+meanPurity);
+		if(RunExperiment.SAVE_RESULT){
+			try {
+				FileWriter fw = new FileWriter(this.outputPath+"/"+RunExperiment.CLUSTERING_MEASURE_FILENAME, true);
+				fw.write(this.k+" "+this.numIter+" "+this.model+" "+this.tw+" "+this.alphaSum+" "+this.betaSum+" "+meanRAND+" "+stderrRAND+" "+meanPurity+" "+stderrPurity+"\n");
+				fw.close();
+			} catch (IOException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
 		}
 	}
 	public void runExperimentWholeCorpus(){
@@ -207,22 +215,24 @@ public class SingleRun {
 		double randCorpus = (Double)me.calculateRANDPerPage().values().toArray()[0];
 		double purityCorpus = (Double)me.calculatePurityPerPage().values().toArray()[0];
 		System.out.println("Corpus RAND score = "+randCorpus+", Purity score = "+purityCorpus);
-		try {
-			FileWriter fw = new FileWriter(this.outputPath+"/"+RunExperiment.CLUSTERING_MEASURE_FILENAME, true);
-			fw.write(this.k+" "+this.numIter+" "+this.model+" "+this.tw+" "+this.alphaSum+" "+this.beta+" "+randCorpus+" 0 "+purityCorpus+" 0\n");
-			fw.close();
-			
-			String runid = "runWholeCorpus"+this.k+this.numIter+this.model+this.tw+this.alphaSum+this.beta;
-			FileWriter fw2 = new FileWriter(this.outputPath+"/"+RunExperiment.TRECEVAL_ASSIGN_FILENAME, true);	
-			for(String q:currQParaAssign.keySet()){
-				ArrayList<String> candParaIDs = currQParaAssign.get(q);
-				for(String para:candParaIDs)
-					fw2.write(q.split("/")[1]+" 0 "+para+" 0 1 "+runid+"\n");
+		if(RunExperiment.SAVE_RESULT){
+			try {
+				FileWriter fw = new FileWriter(this.outputPath+"/"+RunExperiment.CLUSTERING_MEASURE_FILENAME, true);
+				fw.write(this.k+" "+this.numIter+" "+this.model+" "+this.tw+" "+this.alphaSum+" "+this.betaSum+" "+randCorpus+" 0 "+purityCorpus+" 0\n");
+				fw.close();
+				
+				String runid = "runWholeCorpus"+this.k+this.numIter+this.model+this.tw+this.alphaSum+this.betaSum;
+				FileWriter fw2 = new FileWriter(this.outputPath+"/"+RunExperiment.TRECEVAL_ASSIGN_FILENAME, true);	
+				for(String q:currQParaAssign.keySet()){
+					ArrayList<String> candParaIDs = currQParaAssign.get(q);
+					for(String para:candParaIDs)
+						fw2.write(q.split("/")[1]+" 0 "+para+" 0 1 "+runid+"\n");
+				}
+				fw2.close();
+			} catch (IOException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
 			}
-			fw2.close();
-		} catch (IOException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
 		}
 	}
 	private ResultForPage getAssignment(InstanceList paraIList, InstanceList queryIList, Data.Page currPage){
@@ -262,7 +272,7 @@ public class SingleRun {
 					System.out.println("K "+numTopics);
 				}
 			}
-			CustomLDA lda = new CustomLDA(numTopics, this.alphaSum, this.beta);
+			CustomLDA lda = new CustomLDA(numTopics, this.alphaSum, this.betaSum);
 			try {
 				lda.addInstances(paraIList);
 				lda.sample(this.numIter);
@@ -331,7 +341,7 @@ public class SingleRun {
 					System.out.println("K "+numTopicsUMM);
 				}
 			}
-			UnigramTopicModel ummlda = new UnigramTopicModel(numTopicsUMM, this.alphaSum, this.beta);
+			UnigramTopicModel ummlda = new UnigramTopicModel(numTopicsUMM, this.alphaSum, this.betaSum);
 			try {
 				ummlda.addInstances(paraIList);
 				ummlda.sample(this.numIter);
@@ -527,8 +537,8 @@ public class SingleRun {
 		for(int i=0; i<queryIList.size(); i++){
 			Instance queryIns = queryIList.get(i);
 			//System.out.println("Page ID: "+page.getPageId());
-			int currQueryTopicProbDist = inf.inferInstanceTopic(queryIns, numIterForInf, thinningForInf, burninForInf);
-			queryTopics[i] = currQueryTopicProbDist;
+			int currQueryTopic = inf.inferInstanceTopic(queryIns, numIterForInf, thinningForInf, burninForInf);
+			queryTopics[i] = currQueryTopic;
 		}
 		if(paraIList.size()!=umm.getData().size())
 			throw new Exception("paralist size and lda topic assignment size dont match!");

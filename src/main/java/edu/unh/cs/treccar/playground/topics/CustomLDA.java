@@ -56,9 +56,7 @@ public class CustomLDA implements Serializable {
 	protected double alphaSum;
 	protected double beta;   // Prior on per-topic multinomial distribution over words
 	protected double betaSum;
-	public static final double DEFAULT_BETA = 0.01;
-	public static final double BETA_SUM = 260; // if beta<0 then beta = BETA_NOM/V
-	public static final double LAMBDA = 0.9; // for smoothing in UMM
+	public static final double DEFAULT_BETASUM = 260;
 	
 	// An array to put the topic counts for the current document. 
 	// Initialized locally below.  Defined here to avoid
@@ -79,7 +77,7 @@ public class CustomLDA implements Serializable {
 	protected boolean printMessages = false;
 	
 	public CustomLDA (int numberOfTopics) {
-		this (numberOfTopics, numberOfTopics, DEFAULT_BETA);
+		this (numberOfTopics, numberOfTopics, DEFAULT_BETASUM);
 	}
 	
 	public CustomLDA (int numberOfTopics, double alphaSum, double beta) {
@@ -97,7 +95,7 @@ public class CustomLDA implements Serializable {
 		this (newLabelAlphabet (numberOfTopics), alphaSum, beta, random);
 	}
 	
-	public CustomLDA (LabelAlphabet topicAlphabet, double alphaSum, double beta, Randoms random)
+	public CustomLDA (LabelAlphabet topicAlphabet, double alphaSum, double betaSum, Randoms random)
 	{
 		this.data = new ArrayList<TopicAssignment>();
 		this.topicAlphabet = topicAlphabet;
@@ -105,7 +103,7 @@ public class CustomLDA implements Serializable {
 
 		this.alphaSum = alphaSum;
 		this.alpha = alphaSum / numTopics;
-		this.beta = beta;
+		this.betaSum = betaSum;
 		this.random = random;
 		
 		if (Integer.bitCount(numTopics) == 1) {
@@ -150,13 +148,12 @@ public class CustomLDA implements Serializable {
 		alphabet = training.getDataAlphabet();
 		numTypes = alphabet.size();
 		
-		if(beta<0)
-			beta = CustomLDA.BETA_SUM/numTypes;
-		betaSum = beta * numTypes;
+		beta = betaSum / numTypes;
 		
 		typeTopicCounts = new int[numTypes][numTopics];
 		initTypeTopicCounts();
 
+		System.out.println("LDA betaSum="+this.betaSum+", beta="+this.beta);
 		int doc = 0;
 
 		for (Instance instance : training) {

@@ -107,19 +107,21 @@ public class UnigramTopicInferencer {
 			if(printMessages)
 				System.out.println("log p'("+k+")="+logpkList[k]+", topicScore("+k+")="+topicScores[k]);
 		}
-		
-		double sumSmooth = numTopics-(numTopics-1)*CustomLDA.LAMBDA;
+		/*
+		double sumSmooth = numTopics-(numTopics-1)*UnigramTopicModel.LAMBDA;
 		for(int k=0; k<numTopics; k++){
-			smoothedScores[k] = (CustomLDA.LAMBDA*topicScores[k]+(1-CustomLDA.LAMBDA))/sumSmooth;
+			smoothedScores[k] = (UnigramTopicModel.LAMBDA*topicScores[k]+(1-UnigramTopicModel.LAMBDA))/sumSmooth;
 			if(printMessages)
 				System.out.println("smoothedScore("+k+")="+smoothedScores[k]);
 		}
+		*/
 		double sample = random.nextUniform();
 		if(printMessages)
 			System.out.println("Sample="+sample);
 		while (sample > 0.0) {
 			inferredTopic++;
-			sample -= smoothedScores[inferredTopic];
+			//sample -= smoothedScores[inferredTopic];
+			sample -= topicScores[inferredTopic];
 		}
 		if(inferredTopic==-1)
 			throw new IllegalStateException("New topic not sampled");

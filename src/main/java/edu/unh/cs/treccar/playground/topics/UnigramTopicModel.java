@@ -9,6 +9,7 @@ import java.text.NumberFormat;
 import cc.mallet.topics.*;
 import cc.mallet.types.*;
 import cc.mallet.util.*;
+import edu.unh.cs.treccar.playground.RunExperiment;
 
 public class UnigramTopicModel implements Serializable {
 
@@ -39,9 +40,8 @@ public class UnigramTopicModel implements Serializable {
 	//protected double alphaSum;
 	protected double beta;   // Prior on per-topic multinomial distribution over words
 	protected double betaSum;
-	public static final double DEFAULT_BETA = 0.01;
-	public static final double BETA_SUM = 260; // if beta<0 then beta = BETA_NOM/V
-	public static final double LAMBDA = 1.0; // for smoothing in UMM
+	public static final double DEFAULT_BETASUM = 260; // if beta<0 then beta = BETA_NOM/V
+	protected double lambda = 0.0;
 	
 	// An array to put the topic counts for the current document. 
 	// Initialized locally below.  Defined here to avoid
@@ -62,7 +62,7 @@ public class UnigramTopicModel implements Serializable {
 	protected boolean printMessages = false;
 	
 	public UnigramTopicModel (int numberOfTopics) {
-		this (numberOfTopics, numberOfTopics, DEFAULT_BETA);
+		this (numberOfTopics, numberOfTopics, DEFAULT_BETASUM);
 	}
 	
 	public UnigramTopicModel (int numberOfTopics, double alphaSum, double beta) {
@@ -80,7 +80,7 @@ public class UnigramTopicModel implements Serializable {
 		this (newLabelAlphabet (numberOfTopics), alphaSum, beta, random);
 	}
 	
-	public UnigramTopicModel (LabelAlphabet topicAlphabet, double alphaSum, double beta, Randoms random)
+	public UnigramTopicModel (LabelAlphabet topicAlphabet, double alphaSum, double betaSum, Randoms random)
 	{
 		this.data = new ArrayList<TopicAssignment>();
 		this.topicAlphabet = topicAlphabet;
@@ -88,7 +88,7 @@ public class UnigramTopicModel implements Serializable {
 
 		//this.alphaSum = alphaSum;
 		//this.alpha = alphaSum / numTopics;
-		this.beta = beta;
+		this.betaSum = betaSum;
 		this.random = random;
 		
 		if (Integer.bitCount(numTopics) == 1) {
@@ -108,7 +108,7 @@ public class UnigramTopicModel implements Serializable {
 		formatter = NumberFormat.getInstance();
 		formatter.setMaximumFractionDigits(5);
 
-		logger.info("Simple LDA: " + numTopics + " topics");
+		logger.info("Unigram Topic Model: " + numTopics + " topics");
 	}
 	
 	public Alphabet getAlphabet() { return alphabet; }
@@ -130,7 +130,7 @@ public class UnigramTopicModel implements Serializable {
 
 	public UnigramTopicInferencer getInferencer(){
 		UnigramTopicInferencer inf = new UnigramTopicInferencer(this.typeTopicCounts, this.tokensPerTopic, 
-				this.alphabet, UnigramTopicModel.BETA_SUM);
+				this.alphabet, this.betaSum);
 		return inf;
 	}
 	
@@ -145,14 +145,13 @@ public class UnigramTopicModel implements Serializable {
 		alphabet = training.getDataAlphabet();
 		numTypes = alphabet.size();
 		
-		if(beta<0)
-			beta = CustomLDA.BETA_SUM/numTypes;
-		betaSum = beta * numTypes;
+		beta = betaSum / numTypes;
 
 		typeTopicCounts = new int[numTypes][numTopics];
 		initTypeTopicCounts();
 		topicDocSequence = new int[training.size()];
 
+		System.out.println("UMM betaSum="+this.betaSum+", beta="+this.beta);
 		int doc = 0;
 
 		for (Instance instance : training) {
@@ -185,10 +184,20 @@ public class UnigramTopicModel implements Serializable {
 	}
 	
 	public void sample (int iterations) throws IOException {
-
+		int lambdaStep = iterations/11;
+		int lambdaCount = 0;
 		for (int iteration = 1; iteration <= iterations; iteration++) {
 
 			long iterationStart = System.currentTimeMillis();
+			lambdaCount++;
+			if(lambdaCount==lambdaStep){
+				lambdaCount = 0;
+				if(this.lambda<0.99)
+					this.lambda+=0.1;
+				else if(this.lambda>0.99 && this.lambda<1.0)
+					this.lambda=1.0;
+				//System.out.println("iter="+iteration+",lambda="+this.lambda);
+			}
 			if(printMessages){
 				System.out.print("Iteration "+iteration+", topicDocSeq array=[");
 				for(int doci=0; doci<topicDocSequence.length; doci++)
@@ -202,7 +211,7 @@ public class UnigramTopicModel implements Serializable {
 				LabelSequence topicSequence =
 					(LabelSequence) data.get(doc).topicSequence;
 
-				sampleTopicsForOneDoc (tokenSequence, topicSequence, doc);
+				sampleTopicsForOneDoc (tokenSequence, topicSequence, doc, this.lambda);
 				if(printMessages){
 					System.out.print("Para "+doc+" topic seq: [");
 					for(int i=0; i<data.get(doc).topicSequence.getLength(); i++){
@@ -228,7 +237,7 @@ public class UnigramTopicModel implements Serializable {
 	}
 	
 	protected void sampleTopicsForOneDoc (FeatureSequence tokenSequence, LabelSequence topicSequence,
-			  int docIndex) {
+			  int docIndex, double lambda) {
 		int oldDocTopic = topicDocSequence[docIndex];
 		
 		int newTopic;
@@ -300,11 +309,13 @@ public class UnigramTopicModel implements Serializable {
 		*/
 		
 		//-------------------------------------------------------------------------//
-		double sumSmooth = numTopics-(numTopics-1)*CustomLDA.LAMBDA;
-		for(int k=0; k<numTopics; k++){
-			smoothedScores[k] = (CustomLDA.LAMBDA*topicScores[k]+(1-CustomLDA.LAMBDA))/sumSmooth;
-			if(printMessages)
-				System.out.println("smoothedScore("+k+")="+smoothedScores[k]);
+		if(RunExperiment.SMOOTHED_UMM){
+			double sumSmooth = numTopics-(numTopics-1)*lambda;
+			for(int k=0; k<numTopics; k++){
+				smoothedScores[k] = (lambda*topicScores[k]+(1-lambda))/sumSmooth;
+				if(printMessages)
+					System.out.println("smoothedScore("+k+")="+smoothedScores[k]);
+			}
 		}
 		//double sample = random.nextUniform()*topicScoreSum;
 		double sample = random.nextUniform();
@@ -313,7 +324,10 @@ public class UnigramTopicModel implements Serializable {
 		newTopic = -1;
 		while (sample > 0.0) {
 			newTopic++;
-			sample -= smoothedScores[newTopic];
+			if(RunExperiment.SMOOTHED_UMM)
+				sample -= smoothedScores[newTopic];
+			else
+				sample -= topicScores[newTopic];
 		}
 		if(newTopic==-1)
 			throw new IllegalStateException("New topic not sampled");
