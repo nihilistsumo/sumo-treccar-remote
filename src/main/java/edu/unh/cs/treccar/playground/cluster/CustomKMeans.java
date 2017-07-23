@@ -124,7 +124,12 @@ public class CustomKMeans extends Clusterer {
     assert (instances.getPipe() == this.instancePipe);
 
     // Initialize clusterMeans
-    initializeMeansSample(instances, this.metric);
+    try{
+    	initializeMeansSample(instances, this.metric);
+    }
+    catch(ArrayIndexOutOfBoundsException e){
+    	e.printStackTrace();
+    }
 
     int clusterLabels[] = new int[instances.size()];
     ArrayList<InstanceList> instanceClusters = new ArrayList<InstanceList>(
@@ -290,12 +295,14 @@ public class CustomKMeans extends Clusterer {
 
     ArrayList<Instance> instances = new ArrayList<Instance>(instList.size());
     for (int i = 0; i < instList.size(); i++) {
-      Instance ins = instList.get(i);
-      SparseVector sparse = (SparseVector) ins.getData();
-      if (sparse.numLocations() == 0)
-        continue;
-
-      instances.add(ins);
+    	Instance ins = instList.get(i);
+    	SparseVector sparse = (SparseVector) ins.getData();
+    	
+    	if (sparse.numLocations() == 0){
+    		logger.info("Got an empty vector from instance, adding it anyway!");
+    		//continue;
+    	}
+    	instances.add(ins);
     }
 
     // Add next center that has the MAX of the MIN of the distances from
@@ -303,27 +310,27 @@ public class CustomKMeans extends Clusterer {
     // not sure who came up with it originally)
 
     for (int i = 0; i < numClusters; i++) {
-      double max = 0;
-      int selected = 0;
-      for (int k = 0; k < instances.size(); k++) {
-        double min = Double.MAX_VALUE;
-        Instance ins = instances.get(k);
-        SparseVector inst = (SparseVector) ins.getData();
-        for (int j = 0; j < clusterMeans.size(); j++) {
-          SparseVector centerInst = clusterMeans.get(j);
-          double dist = metric.distance(centerInst, inst);
-          if (dist < min)
-            min = dist;
+    	double max = 0;
+    	int selected = 0;
+    	for (int k = 0; k < instances.size(); k++) {
+    		double min = Double.MAX_VALUE;
+    		Instance ins = instances.get(k);
+    		SparseVector inst = (SparseVector) ins.getData();
+    		for (int j = 0; j < clusterMeans.size(); j++) {
+    			SparseVector centerInst = clusterMeans.get(j);
+    			double dist = metric.distance(centerInst, inst);
+    			if (dist < min)
+    				min = dist;
 
-        }
-        if (min > max) {
-          selected = k;
-          max = min;
-        }
-      }
+    		}
+    		if (min > max) {
+    			selected = k;
+    			max = min;
+    		}
+    	}
 
-      Instance newCenter = instances.remove(selected);
-      clusterMeans.add((SparseVector) newCenter.getData());
+    	Instance newCenter = instances.remove(selected);
+    	clusterMeans.add((SparseVector) newCenter.getData());
     }
 
   }

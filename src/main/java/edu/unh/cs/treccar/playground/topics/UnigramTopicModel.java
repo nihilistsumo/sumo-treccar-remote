@@ -51,7 +51,8 @@ public class UnigramTopicModel implements Serializable {
 	// Statistics needed for sampling.
 	protected int[][] typeTopicCounts; // indexed by <feature index, topic index>
 	protected int[] tokensPerTopic; // indexed by <topic index>
-	protected int[] topicDocSequence; // indexed by <doc index> for unigram
+	protected int[] docTopicSequence; // indexed by <doc index> for unigram
+	protected double[][] docTopicScores; // indexed by <doc index, topic index>
 
 	public int showTopicsInterval = 50;
 	public int wordsPerTopic = 10;
@@ -136,7 +137,10 @@ public class UnigramTopicModel implements Serializable {
 	
 	public int getTopicOfInstance(int instanceIndex){
 		// equivalent to getTopicProbabilities() of CustomLDA
-		return this.topicDocSequence[instanceIndex];
+		return this.docTopicSequence[instanceIndex];
+	}
+	public double[] getTopicScoresOfInstance(int instanceIndex){
+		return this.docTopicScores[instanceIndex];
 	}
 	
 	// addInstances method for unigram style //
@@ -148,8 +152,9 @@ public class UnigramTopicModel implements Serializable {
 		beta = betaSum / numTypes;
 
 		typeTopicCounts = new int[numTypes][numTopics];
-		initTypeTopicCounts();
-		topicDocSequence = new int[training.size()];
+		docTopicSequence = new int[training.size()];
+		docTopicScores = new double[training.size()][numTopics];
+		initAll();
 
 		System.out.println("UMM betaSum="+this.betaSum+", beta="+this.beta);
 		int doc = 0;
@@ -161,7 +166,8 @@ public class UnigramTopicModel implements Serializable {
 
 			int[] topics = topicSequence.getFeatures();
 			int topic = random.nextInt(numTopics);
-			topicDocSequence[doc] = topic;
+			docTopicSequence[doc] = topic;
+			docTopicScores[doc][topic] = 1.0;
 			for (int position = 0; position < tokens.size(); position++) {
 				topics[position] = topic;
 				tokensPerTopic[topic]++;
@@ -176,9 +182,11 @@ public class UnigramTopicModel implements Serializable {
 		}
 	}
 	
-	private void initTypeTopicCounts(){
-		for(int type=0; type<numTypes; type++){
-			for(int topic=0; topic<numTopics; topic++)
+	private void initAll(){
+		for(int topic=0; topic<numTopics; topic++){
+			for(int doc=0; doc<docTopicScores.length; doc++)
+				docTopicScores[doc][topic]=0.0;
+			for(int type=0; type<numTypes; type++)
 				typeTopicCounts[type][topic] = topic;
 		}
 	}
@@ -187,7 +195,6 @@ public class UnigramTopicModel implements Serializable {
 		int lambdaStep = iterations/11;
 		int lambdaCount = 0;
 		for (int iteration = 1; iteration <= iterations; iteration++) {
-
 			long iterationStart = System.currentTimeMillis();
 			lambdaCount++;
 			if(lambdaCount==lambdaStep){
@@ -200,8 +207,8 @@ public class UnigramTopicModel implements Serializable {
 			}
 			if(printMessages){
 				System.out.print("Iteration "+iteration+", topicDocSeq array=[");
-				for(int doci=0; doci<topicDocSequence.length; doci++)
-					System.out.print(topicDocSequence[doci]+" ");
+				for(int doci=0; doci<docTopicSequence.length; doci++)
+					System.out.print(docTopicSequence[doci]+" ");
 				System.out.print("]\n");
 			}
 			// Loop over every document in the corpus
@@ -238,7 +245,7 @@ public class UnigramTopicModel implements Serializable {
 	
 	protected void sampleTopicsForOneDoc (FeatureSequence tokenSequence, LabelSequence topicSequence,
 			  int docIndex, double lambda) {
-		int oldDocTopic = topicDocSequence[docIndex];
+		int oldDocTopic = docTopicSequence[docIndex];
 		
 		int newTopic;
 		int docLength = tokenSequence.getLength(); // T
@@ -250,7 +257,7 @@ public class UnigramTopicModel implements Serializable {
 		// now typeTopicCounts is n_{k,-i}^(t)
 		tokensPerTopic[oldDocTopic]-=docLength;
 		// now tokensPerTopic is tc_{k,-i}
-		topicDocSequence[docIndex] = -1;
+		docTopicSequence[docIndex] = -1;
 		
 		double[] topicScores = new double[numTopics];
 		double[] smoothedScores = new double[numTopics];
@@ -316,6 +323,9 @@ public class UnigramTopicModel implements Serializable {
 				if(printMessages)
 					System.out.println("smoothedScore("+k+")="+smoothedScores[k]);
 			}
+			docTopicScores[docIndex] = smoothedScores;
+		} else{
+			docTopicScores[docIndex] = topicScores;
 		}
 		//double sample = random.nextUniform()*topicScoreSum;
 		double sample = random.nextUniform();
@@ -342,306 +352,7 @@ public class UnigramTopicModel implements Serializable {
 		// now typeTopicCounts is n_{k}^(t)
 		tokensPerTopic[newTopic]+=docLength;
 		// now tokensPerTopic is tc_{k}
-		topicDocSequence[docIndex] = newTopic;
+		docTopicSequence[docIndex] = newTopic;
 	}
 	private static final long serialVersionUID = 1;
-	
-	/*
-	public double modelLogLikelihood() {
-		double logLikelihood = 0.0;
-
-		// The likelihood of the model is a combination of a 
-		// Dirichlet-multinomial for the words in each topic
-		// and a Dirichlet-multinomial for the topics in each
-		// document.
-
-		// The likelihood function of a dirichlet multinomial is
-		//	 Gamma( sum_i alpha_i )	 prod_i Gamma( alpha_i + N_i )
-		//	prod_i Gamma( alpha_i )	  Gamma( sum_i (alpha_i + N_i) )
-
-		// So the log likelihood is 
-		//	logGamma ( sum_i alpha_i ) - logGamma ( sum_i (alpha_i + N_i) ) + 
-		//	 sum_i [ logGamma( alpha_i + N_i) - logGamma( alpha_i ) ]
-
-		// Do the documents first
-
-		int[] topicCounts = new int[numTopics];
-		double[] topicLogGammas = new double[numTopics];
-		int[] docTopics;
-
-		for (int topic=0; topic < numTopics; topic++) {
-			topicLogGammas[ topic ] = Dirichlet.logGamma( alpha );
-		}
-	
-		for (int doc=0; doc < data.size(); doc++) {
-			LabelSequence topicSequence = (LabelSequence) data.get(doc).topicSequence;
-
-			docTopics = topicSequence.getFeatures();
-
-			for (int token=0; token < docTopics.length; token++) {
-				topicCounts[ docTopics[token] ]++;
-			}
-
-			for (int topic=0; topic < numTopics; topic++) {
-				if (topicCounts[topic] > 0) {
-					logLikelihood += (Dirichlet.logGamma(alpha + topicCounts[topic]) -
-									  topicLogGammas[ topic ]);
-				}
-			}
-
-			// subtract the (count + parameter) sum term
-			logLikelihood -= Dirichlet.logGamma(alphaSum + docTopics.length);
-
-			Arrays.fill(topicCounts, 0);
-		}
-	
-		// add the parameter sum term
-		logLikelihood += data.size() * Dirichlet.logGamma(alphaSum);
-
-		// And the topics
-
-		double logGammaBeta = Dirichlet.logGamma(beta);
-
-		for (int type=0; type < numTypes; type++) {
-			// reuse this array as a pointer
-
-			topicCounts = typeTopicCounts[type];
-
-			for (int topic = 0; topic < numTopics; topic++) {
-				if (topicCounts[topic] == 0) { continue; }
-				
-				logLikelihood += Dirichlet.logGamma(beta + topicCounts[topic]) -
-					logGammaBeta;
-
-				if (Double.isNaN(logLikelihood)) {
-					System.out.println(topicCounts[topic]);
-					System.exit(1);
-				}
-			}
-		}
-	
-		for (int topic=0; topic < numTopics; topic++) {
-			logLikelihood -= 
-				Dirichlet.logGamma( (beta * numTypes) +
-											tokensPerTopic[ topic ] );
-			if (Double.isNaN(logLikelihood)) {
-				System.out.println("after topic " + topic + " " + tokensPerTopic[ topic ]);
-				System.exit(1);
-			}
-
-		}
-	
-		logLikelihood += 
-			numTopics * Dirichlet.logGamma(beta * numTypes);
-
-		if (Double.isNaN(logLikelihood)) {
-			System.out.println("at the end");
-			System.exit(1);
-		}
-
-
-		return logLikelihood;
-	}
-
-	// 
-	// Methods for displaying and saving results
-	//
-
-	public String topWords (int numWords) {
-
-		StringBuilder output = new StringBuilder();
-
-		IDSorter[] sortedWords = new IDSorter[numTypes];
-
-		for (int topic = 0; topic < numTopics; topic++) {
-			for (int type = 0; type < numTypes; type++) {
-				sortedWords[type] = new IDSorter(type, typeTopicCounts[type][topic]);
-			}
-
-			Arrays.sort(sortedWords);
-			
-			output.append(topic + "\t" + tokensPerTopic[topic] + "\t");
-			for (int i=0; i < numWords; i++) {
-				output.append(alphabet.lookupObject(sortedWords[i].getID()) + " ");
-			}
-			output.append("\n");
-		}
-
-		return output.toString();
-	}
-	*/
-
-	/**
-	 *  @param file        The filename to print to
-	 *  @param threshold   Only print topics with proportion greater than this number
-	 *  @param max         Print no more than this many topics
-	 */
-	/*
-	public void printDocumentTopics (File file, double threshold, int max) throws IOException {
-		PrintWriter out = new PrintWriter(file);
-
-		out.print ("#doc source topic proportion ...\n");
-		int docLen;
-		int[] topicCounts = new int[ numTopics ];
-
-		IDSorter[] sortedTopics = new IDSorter[ numTopics ];
-		for (int topic = 0; topic < numTopics; topic++) {
-			// Initialize the sorters with dummy values
-			sortedTopics[topic] = new IDSorter(topic, topic);
-		}
-
-		if (max < 0 || max > numTopics) {
-			max = numTopics;
-		}
-
-		for (int doc = 0; doc < data.size(); doc++) {
-			LabelSequence topicSequence = (LabelSequence) data.get(doc).topicSequence;
-			int[] currentDocTopics = topicSequence.getFeatures();
-
-			out.print (doc); out.print (' ');
-
-			if (data.get(doc).instance.getSource() != null) {
-				out.print (data.get(doc).instance.getSource()); 
-			}
-			else {
-				out.print ("null-source");
-			}
-
-			out.print (' ');
-			docLen = currentDocTopics.length;
-
-			// Count up the tokens
-			for (int token=0; token < docLen; token++) {
-				topicCounts[ currentDocTopics[token] ]++;
-			}
-
-			// And normalize
-			for (int topic = 0; topic < numTopics; topic++) {
-				sortedTopics[topic].set(topic, (float) topicCounts[topic] / docLen);
-			}
-			
-			Arrays.sort(sortedTopics);
-
-			for (int i = 0; i < max; i++) {
-				if (sortedTopics[i].getWeight() < threshold) { break; }
-				
-				out.print (sortedTopics[i].getID() + " " + 
-						  sortedTopics[i].getWeight() + " ");
-			}
-			out.print (" \n");
-
-			Arrays.fill(topicCounts, 0);
-		}
-		
-	}
-	
-	public void printState (File f) throws IOException {
-		PrintStream out =
-			new PrintStream(new GZIPOutputStream(new BufferedOutputStream(new FileOutputStream(f))));
-		printState(out);
-		out.close();
-	}
-	
-	public void printState (PrintStream out) {
-
-		out.println ("#doc source pos typeindex type topic");
-
-		for (int doc = 0; doc < data.size(); doc++) {
-			FeatureSequence tokenSequence =	(FeatureSequence) data.get(doc).instance.getData();
-			LabelSequence topicSequence =	(LabelSequence) data.get(doc).topicSequence;
-
-			String source = "NA";
-			if (data.get(doc).instance.getSource() != null) {
-				source = data.get(doc).instance.getSource().toString();
-			}
-
-			for (int position = 0; position < topicSequence.getLength(); position++) {
-				int type = tokenSequence.getIndexAtPosition(position);
-				int topic = topicSequence.getIndexAtPosition(position);
-				out.print(doc); out.print(' ');
-				out.print(source); out.print(' '); 
-				out.print(position); out.print(' ');
-				out.print(type); out.print(' ');
-				out.print(alphabet.lookupObject(type)); out.print(' ');
-				out.print(topic); out.println();
-			}
-		}
-	}
-	
-	
-	// Serialization
-	
-	private static final long serialVersionUID = 1;
-	private static final int CURRENT_SERIAL_VERSION = 0;
-	private static final int NULL_INTEGER = -1;
-	
-	public void write (File f) {
-		try {
-			ObjectOutputStream oos = new ObjectOutputStream (new FileOutputStream(f));
-			oos.writeObject(this);
-			oos.close();
-		}
-		catch (IOException e) {
-			System.err.println("Exception writing file " + f + ": " + e);
-		}
-	}
-	
-	private void writeObject (ObjectOutputStream out) throws IOException {
-		out.writeInt (CURRENT_SERIAL_VERSION);
-
-		// Instance lists
-		out.writeObject (data);
-		out.writeObject (alphabet);
-		out.writeObject (topicAlphabet);
-
-		out.writeInt (numTopics);
-		out.writeObject (alpha);
-		out.writeDouble (beta);
-		out.writeDouble (betaSum);
-
-		out.writeInt(showTopicsInterval);
-		out.writeInt(wordsPerTopic);
-
-		out.writeObject(random);
-		out.writeObject(formatter);
-		out.writeBoolean(printLogLikelihood);
-
-		out.writeObject (typeTopicCounts);
-
-		for (int ti = 0; ti < numTopics; ti++) {
-			out.writeInt (tokensPerTopic[ti]);
-		}
-	}
-	
-	private void readObject (ObjectInputStream in) throws IOException, ClassNotFoundException {
-		int featuresLength;
-		int version = in.readInt ();
-
-		data = (ArrayList<TopicAssignment>) in.readObject ();
-		alphabet = (Alphabet) in.readObject();
-		topicAlphabet = (LabelAlphabet) in.readObject();
-
-		numTopics = in.readInt();
-		alpha = in.readDouble();
-		alphaSum = alpha * numTopics;
-		beta = in.readDouble();
-		betaSum = in.readDouble();
-
-		showTopicsInterval = in.readInt();
-		wordsPerTopic = in.readInt();
-
-		random = (Randoms) in.readObject();
-		formatter = (NumberFormat) in.readObject();
-		printLogLikelihood = in.readBoolean();
-		
-		int numDocs = data.size();
-		this.numTypes = alphabet.size();
-
-		typeTopicCounts = (int[][]) in.readObject();
-		tokensPerTopic = new int[numTopics];
-		for (int ti = 0; ti < numTopics; ti++) {
-			tokensPerTopic[ti] = in.readInt();
-		}
-	}
-	*/
 }

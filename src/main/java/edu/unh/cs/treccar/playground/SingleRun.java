@@ -473,8 +473,7 @@ public class SingleRun {
 		for(int i=0; i<queryIList.size(); i++){
 			Instance queryIns = queryIList.get(i);
 			//System.out.println("Page ID: "+page.getPageId());
-			double[] currQueryTopicProbDist = inf.getSampledDistribution(queryIns, numIterForInf, thinningForInf, burninForInf);
-			queryTopicProbMatrix[i] = currQueryTopicProbDist;
+			queryTopicProbMatrix[i] = inf.getSampledDistribution(queryIns, numIterForInf, thinningForInf, burninForInf);
 		}
 		if(paraIList.size()!=lda.getData().size())
 			throw new Exception("paralist size and lda topic assignment size dont match!");
@@ -487,6 +486,117 @@ public class SingleRun {
 		boolean[] isParaAssigned = new boolean[paraIList.size()];
 		for(int pos=0; pos<isParaAssigned.length; pos++)
 			isParaAssigned[pos] = false;
+		if(RunExperiment.ASSIGN_BY_MATRIX){
+			double[][] paraQueryKLdivMat = new double[paraIList.size()][queryIList.size()];
+			int[] bestQueryForPara = new int[paraIList.size()];
+			double[] queryVals = new double[queryIList.size()];
+			for(int n=0; n<paraIList.size(); n++){
+				for(int m=0; m<queryIList.size(); m++){
+					paraQueryKLdivMat[n][m] = getKLdiv(queryTopicProbMatrix[m], paraTopicProbMatrix[n]);
+				}
+			}
+			
+			for(int n=0; n<paraIList.size(); n++){
+				int bestQueryInd=0;
+				double minVal = 99999.0;
+				queryVals = paraQueryKLdivMat[n];
+				for(int m=0; m<queryIList.size(); m++){
+					if(queryVals[m]<minVal){
+						bestQueryInd = m;
+						minVal = queryVals[m];
+					}
+				}
+				bestQueryForPara[n] = bestQueryInd;
+			}
+			boolean isDone = false;
+			double maxKLVal = getMaxVal(paraQueryKLdivMat);
+			int[] minInd = new int[2];
+			while(!isDone){
+				minInd = getMinValIndex(paraQueryKLdivMat, maxKLVal);
+				assign.get(queryIList.get(minInd[1])).add(paraIList.get(minInd[0]));
+				isParaAssigned[minInd[0]] = true;
+				for(int r=0; r<paraQueryKLdivMat.length; r++){
+					for(int c=0; c<paraQueryKLdivMat[0].length; c++){
+						if(r==minInd[0] || c==minInd[1])
+							paraQueryKLdivMat[r][c] = maxKLVal+1;
+					}
+				}	
+				isDone = checkIfDone(paraQueryKLdivMat, maxKLVal);
+			}
+			for(int n=0; n<isParaAssigned.length; n++){
+				if(!isParaAssigned[n])
+					assign.get(queryIList.get(bestQueryForPara[n])).add(paraIList.get(n));
+			}
+		} else{
+			for(int m=0; m<queryIList.size(); m++){
+				Instance queryIns = queryIList.get(m);
+				int bestParaInsIndex = 0;
+				double minKLDiv = 99999.0;
+				for(int n=0; n<paraIList.size(); n++){
+					if(!isParaAssigned[n]){
+						double currKLDiv = getKLdiv(queryTopicProbMatrix[m], paraTopicProbMatrix[n]);
+						if(currKLDiv<minKLDiv){
+							minKLDiv = currKLDiv;
+							bestParaInsIndex = n;
+						}
+					}
+				}
+				assign.get(queryIns).add(paraIList.get(bestParaInsIndex));
+				isParaAssigned[bestParaInsIndex] = true;
+			}
+			for(int p=0; p<paraIList.size(); p++){
+				if(!isParaAssigned[p]){
+					Instance bestQueryIns = queryIList.get(0);
+					double minKLDiv = 99999.0;
+					for(int q=0; q<queryIList.size(); q++){
+						double currKLDiv = getKLdiv(queryTopicProbMatrix[q], paraTopicProbMatrix[p]);
+						if(currKLDiv<minKLDiv){
+							minKLDiv = currKLDiv;
+							bestQueryIns = queryIList.get(q);
+						}
+					}
+					assign.get(bestQueryIns).add(paraIList.get(p));
+				}
+			}
+		}
+		HashMap<String, ArrayList<String>> assignment = convInsAssignToIDAssign(assign, page);
+		ResultForPage r = new ResultForPage();
+		r.setQueryParaAssignment(assignment);
+		r.setParaClusters(getParasClustersFromMatrix(paraTopicProbMatrix, paraIList, lda.getNumTopics()));
+		return r;
+	}
+	private ResultForPage assignUsingUMM(InstanceList paraIList, InstanceList queryIList, UnigramTopicModel umm, Data.Page page) throws Exception{
+		HashMap<Instance, ArrayList<Instance>> assign = new HashMap<Instance, ArrayList<Instance>>();
+		for(Instance qIns:queryIList)
+			assign.put(qIns, new ArrayList<Instance>());
+		
+		UnigramTopicInferencer inf = umm.getInferencer();
+		int numIterForInf = 30;
+		int thinningForInf = 1;
+		int burninForInf = 5;
+		int[] queryTopics = new int[queryIList.size()];
+		double[][] queryTopicScores = new double[queryIList.size()][umm.getNumTopics()];
+		int[] paraTopics = new int[paraIList.size()];
+		double[][] paraTopicScores = new double[paraIList.size()][umm.getNumTopics()];
+		for(int i=0; i<queryIList.size(); i++){
+			Instance queryIns = queryIList.get(i);
+			//System.out.println("Page ID: "+page.getPageId());
+			queryTopics[i] = inf.inferInstanceTopic(queryIns, numIterForInf, thinningForInf, burninForInf);
+			queryTopicScores[i] = inf.inferInstanceTopicScores(queryIns, numIterForInf, thinningForInf, burninForInf);
+		}
+		if(paraIList.size()!=umm.getData().size())
+			throw new Exception("paralist size and lda topic assignment size dont match!");
+		for(int j=0; j<paraIList.size(); j++){
+			// Following if block ensures that we are picking the correct topic dist for current para instance
+			if(paraIList.get(j).getName()!=umm.getData().get(j).instance.getName())
+				throw new Exception("paraIList indices are not following the same order as ummlda instances");
+			paraTopics[j] = umm.getTopicOfInstance(j);
+			paraTopicScores[j] = umm.getTopicScoresOfInstance(j);
+		}
+		boolean[] isParaAssigned = new boolean[paraIList.size()];
+		for(int pos=0; pos<isParaAssigned.length; pos++)
+			isParaAssigned[pos] = false;
+		/*
 		for(int m=0; m<queryIList.size(); m++){
 			Instance queryIns = queryIList.get(m);
 			int bestParaInsIndex = 0;
@@ -517,81 +627,60 @@ public class SingleRun {
 				assign.get(bestQueryIns).add(paraIList.get(p));
 			}
 		}
-		HashMap<String, ArrayList<String>> assignment = convInsAssignToIDAssign(assign, page);
-		ResultForPage r = new ResultForPage();
-		r.setQueryParaAssignment(assignment);
-		r.setParaClusters(getParasClustersFromMatrix(paraTopicProbMatrix, paraIList, lda.getNumTopics()));
-		return r;
-	}
-	private ResultForPage assignUsingUMM(InstanceList paraIList, InstanceList queryIList, UnigramTopicModel umm, Data.Page page) throws Exception{
-		HashMap<Instance, ArrayList<Instance>> assign = new HashMap<Instance, ArrayList<Instance>>();
-		for(Instance qIns:queryIList)
-			assign.put(qIns, new ArrayList<Instance>());
-		
-		UnigramTopicInferencer inf = umm.getInferencer();
-		int numIterForInf = 30;
-		int thinningForInf = 1;
-		int burninForInf = 5;
-		int[] queryTopics = new int[queryIList.size()];
-		int[] paraTopics = new int[paraIList.size()];
-		for(int i=0; i<queryIList.size(); i++){
-			Instance queryIns = queryIList.get(i);
-			//System.out.println("Page ID: "+page.getPageId());
-			int currQueryTopic = inf.inferInstanceTopic(queryIns, numIterForInf, thinningForInf, burninForInf);
-			queryTopics[i] = currQueryTopic;
-		}
-		if(paraIList.size()!=umm.getData().size())
-			throw new Exception("paralist size and lda topic assignment size dont match!");
-		for(int j=0; j<paraIList.size(); j++){
-			// Following if block ensures that we are picking the correct topic dist for current para instance
-			if(paraIList.get(j).getName()!=umm.getData().get(j).instance.getName())
-				throw new Exception("paraIList indices are not following the same order as ummlda instances");
-			paraTopics[j] = umm.getTopicOfInstance(j);
-		}
-		boolean[] isParaAssigned = new boolean[paraIList.size()];
-		for(int pos=0; pos<isParaAssigned.length; pos++)
-			isParaAssigned[pos] = false;
-		/*for(int m=0; m<queryIList.size(); m++){
-			Instance queryIns = queryIList.get(m);
-			int bestParaInsIndex = 0;
-			double minKLDiv = 99999.0;
+		*/
+		if(RunExperiment.ASSIGN_BY_MATRIX){
+			double[][] paraQueryKLdivMat = new double[paraIList.size()][queryIList.size()];
+			int[] bestQueryForPara = new int[paraIList.size()];
+			double[] queryVals = new double[queryIList.size()];
 			for(int n=0; n<paraIList.size(); n++){
-				if(!isParaAssigned[n]){
-					double currKLDiv = getKLdiv(queryTopicProbMatrix[m], paraTopicProbMatrix[n]);
-					if(currKLDiv<minKLDiv){
-						minKLDiv = currKLDiv;
-						bestParaInsIndex = n;
+				for(int m=0; m<queryIList.size(); m++)
+					paraQueryKLdivMat[n][m] = getKLdiv(queryTopicScores[m], paraTopicScores[n]);
+			}
+			for(int n=0; n<paraIList.size(); n++){
+				int bestQueryInd=0;
+				double minVal = 99999.0;
+				queryVals = paraQueryKLdivMat[n];
+				for(int m=0; m<queryIList.size(); m++){
+					if(queryVals[m]<minVal){
+						bestQueryInd = m;
+						minVal = queryVals[m];
+					}
+				}
+				bestQueryForPara[n] = bestQueryInd;
+			}
+			boolean isDone = false;
+			double maxKLVal = getMaxVal(paraQueryKLdivMat);
+			int[] minInd = new int[2];
+			while(!isDone){
+				minInd = getMinValIndex(paraQueryKLdivMat, maxKLVal);
+				assign.get(queryIList.get(minInd[1])).add(paraIList.get(minInd[0]));
+				isParaAssigned[minInd[0]] = true;
+				for(int r=0; r<paraQueryKLdivMat.length; r++){
+					for(int c=0; c<paraQueryKLdivMat[0].length; c++){
+						if(r==minInd[0] || c==minInd[1])
+							paraQueryKLdivMat[r][c] = maxKLVal+1;
+					}
+				}	
+				isDone = checkIfDone(paraQueryKLdivMat, maxKLVal);
+			}
+			for(int n=0; n<isParaAssigned.length; n++){
+				if(!isParaAssigned[n])
+					assign.get(queryIList.get(bestQueryForPara[n])).add(paraIList.get(n));
+			}
+		} else{
+			for(int q=0; q<queryTopics.length; q++){
+				Instance currQIns = queryIList.get(q);
+				for(int p=0; p<paraTopics.length; p++){
+					if(!isParaAssigned[p]){
+						if(queryTopics[q]==paraTopics[p]){
+							assign.get(currQIns).add(paraIList.get(p));
+							isParaAssigned[p] = true;
+						}
 					}
 				}
 			}
-			assign.get(queryIns).add(paraIList.get(bestParaInsIndex));
-			isParaAssigned[bestParaInsIndex] = true;
 		}
-		for(int p=0; p<paraIList.size(); p++){
-			if(!isParaAssigned[p]){
-				Instance bestQueryIns = queryIList.get(0);
-				double minKLDiv = 99999.0;
-				for(int q=0; q<queryIList.size(); q++){
-					double currKLDiv = getKLdiv(queryTopicProbMatrix[q], paraTopicProbMatrix[p]);
-					if(currKLDiv<minKLDiv){
-						minKLDiv = currKLDiv;
-						bestQueryIns = queryIList.get(q);
-					}
-				}
-				assign.get(bestQueryIns).add(paraIList.get(p));
-			}
-		}*/
-		for(int q=0; q<queryTopics.length; q++){
-			Instance currQIns = queryIList.get(q);
-			for(int p=0; p<paraTopics.length; p++){
-				if(!isParaAssigned[p]){
-					if(queryTopics[q]==paraTopics[p]){
-						assign.get(currQIns).add(paraIList.get(p));
-						isParaAssigned[p] = true;
-					}
-				}
-			}
-		}
+		
 		HashMap<String, ArrayList<String>> assignment = convInsAssignToIDAssign(assign, page);
 		ResultForPage r = new ResultForPage();
 		r.setQueryParaAssignment(assignment);
@@ -807,6 +896,41 @@ public class SingleRun {
 			e.printStackTrace();
 		}
 		return gtMap;
+	}
+	public int[] getMinValIndex(double[][] kldivMat, double maxVal){
+		int[] minindex = new int[2];
+		double currVal, minVal=maxVal+2;
+		for(int i=0; i<kldivMat.length; i++){
+			for(int j=0; j<kldivMat[0].length; j++){
+				currVal = kldivMat[i][j];
+				if(currVal<minVal){
+					minVal = currVal;
+					minindex[0] = i;
+					minindex[1] = j;
+				}
+			}
+		}
+		return minindex;
+	}
+	public double getMaxVal(double[][] kldivMat){
+		double currVal, maxVal=0;
+		for(int i=0; i<kldivMat.length; i++){
+			for(int j=0; j<kldivMat[0].length; j++){
+				currVal = kldivMat[i][j];
+				if(currVal>maxVal)
+					maxVal = currVal;
+			}
+		}
+		return maxVal;
+	}
+	public boolean checkIfDone(double[][] kldivMat, double maxVal){
+		for(int i=0; i<kldivMat.length; i++){
+			for(int j=0; j<kldivMat[0].length; j++){
+				if(kldivMat[i][j]<=maxVal)
+					return false;
+			}
+		}
+		return true;
 	}
 	public static Pipe buildPipe(int model){
 		if(model==1 || model==3)

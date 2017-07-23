@@ -64,12 +64,29 @@ public class UnigramTopicInferencer {
 		random = new Randoms();
 }
 	
-	// equivalent to getSampledDistribution() of TopicInferencer
 	public int inferInstanceTopic(Instance instance, int numIterations, int thinning, int burnIn) {
+		double sample = random.nextUniform();
+		int inferredTopic=-1;
+		boolean printMessages = true;
+		double[] topicScores = inferInstanceTopicScores(instance, numIterations, thinning, burnIn);
+		if(printMessages)
+			System.out.println("Sample="+sample);
+		while (sample > 0.0) {
+			inferredTopic++;
+			//sample -= smoothedScores[inferredTopic];
+			sample -= topicScores[inferredTopic];
+		}
+		if(inferredTopic==-1)
+			throw new IllegalStateException("New topic not sampled");
+		if(printMessages)
+			System.out.println("New topic="+inferredTopic);
+		return inferredTopic;
+	}
+	// equivalent to getSampledDistribution() of TopicInferencer
+	public double[] inferInstanceTopicScores(Instance instance, int numIterations, int thinning, int burnIn) {
 		double[] topicScores = new double[numTopics];
 		double[] smoothedScores = new double[numTopics];
 		double[] logpkList = new double[numTopics];
-		int inferredTopic = -1;
 		boolean printMessages = true;
 		
 		FeatureSequence tokens = (FeatureSequence) instance.getData();
@@ -115,19 +132,7 @@ public class UnigramTopicInferencer {
 				System.out.println("smoothedScore("+k+")="+smoothedScores[k]);
 		}
 		*/
-		double sample = random.nextUniform();
-		if(printMessages)
-			System.out.println("Sample="+sample);
-		while (sample > 0.0) {
-			inferredTopic++;
-			//sample -= smoothedScores[inferredTopic];
-			sample -= topicScores[inferredTopic];
-		}
-		if(inferredTopic==-1)
-			throw new IllegalStateException("New topic not sampled");
-		if(printMessages)
-			System.out.println("New topic="+inferredTopic);
-		return inferredTopic;
+		return topicScores;
 	}
 
 }

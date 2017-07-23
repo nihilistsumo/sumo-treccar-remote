@@ -6,12 +6,12 @@ import com.trolltech.qt.gui.*;
 
 public class RunExperiment {
 	// k0beta_umm
-	public static final boolean SAVE_RESULT = false;
-	public static final String CLUSTERING_MEASURE_FILENAME = "umm_iter";
-	public static final String TRECEVAL_ASSIGN_FILENAME = "umm_iter_trec";
+	public static final boolean SAVE_RESULT = true;
+	public static final String CLUSTERING_MEASURE_FILENAME = "dummy";
+	public static final String TRECEVAL_ASSIGN_FILENAME = "dummy_trec";
 	public static final boolean RUN_BY_PAGE = true;
-	//public static final double LAMBDA_UMM = 0.99;
-	public static final boolean SMOOTHED_UMM = true;
+	public static final boolean ASSIGN_BY_MATRIX = true;
+	public static final boolean SMOOTHED_UMM = false;
 	
 	public static void main(String[] args) {
 		// TODO Auto-generated method stub
@@ -25,19 +25,10 @@ public class RunExperiment {
 
         QApplication.execStatic();
         */
-		/*
-        SingleRun sr = new SingleRun(new String[]{"0","20","1","0","1.0","0.3",
-        		"/home/sumanta/Documents/new_research/unh/test200-v1.4/all.test200.cbor.paragraphs",
-        		"/home/sumanta/Documents/new_research/unh/test200-v1.4/all.test200.cbor.outlines",
-        		"/home/sumanta/Documents/new_research/unh/test200-v1.4/all.test200.cbor.toplevel.qrels",
-        		"/home/sumanta/Documents/new_research/unh/test200-v1.4/all.test200.cbor.article.qrels",
-        		""});
-        sr.runExperiment();
-        */
-        String model = "1";
+        String model = "3";
         // 1 for LDA, 2 for kmeans, 3 for unigram tm
         String tw = "0"; // currently ignored
-        String startK="0", startIter="300", startAlpha="1.0", startBeta="260"; 
+        String startK="0", startIter="100", startAlpha="1.0", startBeta="260"; 
         // treat alpha and beta as alphaSum and betaSum
         String stopK=startK, stopIter=startIter, stopAlpha=startAlpha, stopBeta=startBeta;
         String stepK="1", stepIter="1", stepAlpha="1", stepBeta="1";
