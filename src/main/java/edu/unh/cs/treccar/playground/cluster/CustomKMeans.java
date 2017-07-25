@@ -24,6 +24,7 @@
 package edu.unh.cs.treccar.playground.cluster;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Random;
 import java.util.logging.Logger;
 
@@ -343,5 +344,8 @@ public class CustomKMeans extends Clusterer {
 
   public ArrayList<SparseVector> getClusterMeans() {
     return this.clusterMeans;
+  }
+  public Metric getMetric(){
+	  return this.metric;
   }
 }

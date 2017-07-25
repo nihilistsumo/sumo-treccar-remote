@@ -33,6 +33,7 @@ import cc.mallet.types.InstanceList;
 import cc.mallet.types.Metric;
 import cc.mallet.types.NormalizedDotProductMetric;
 import cc.mallet.types.SparseVector;
+import cc.mallet.util.VectorStats;
 import co.nstant.in.cbor.CborException;
 import edu.unh.cs.treccar.Data;
 import edu.unh.cs.treccar.playground.cluster.CustomKMeans;
@@ -43,7 +44,7 @@ import edu.unh.cs.treccar.read_data.DeserializeData;
 import edu.unh.cs.treccar.read_data.DeserializeData.RuntimeCborException;
 
 public class SingleRun {
-	int k, numIter, model, tw;
+	int k, numIter, model, tw, countNan=0;
 	double alphaSum, betaSum;
 	String paraPath, outlinePath, gtPath, articleQrelsPath, outputPath;
 	private HashMap<String, ArrayList<String>> gtSecParaMap = null;
@@ -186,6 +187,7 @@ public class SingleRun {
 		stdDevP = Math.sqrt((sumSqrDevP/pagePurity.size()));
 		stderrPurity = stdDevP/Math.sqrt(pagePurity.size());
 		System.out.println("Mean RAND = "+meanRAND+", mean Purity = "+meanPurity);
+		System.out.println("NAN sections: "+this.countNan);
 		if(RunExperiment.SAVE_RESULT){
 			try {
 				FileWriter fw = new FileWriter(this.outputPath+"/"+RunExperiment.CLUSTERING_MEASURE_FILENAME, true);
@@ -483,82 +485,7 @@ public class SingleRun {
 				throw new Exception("paraIList indices are not following the same order as lda instances");
 			paraTopicProbMatrix[j] = lda.getTopicProbabilities(j);
 		}
-		boolean[] isParaAssigned = new boolean[paraIList.size()];
-		for(int pos=0; pos<isParaAssigned.length; pos++)
-			isParaAssigned[pos] = false;
-		if(RunExperiment.ASSIGN_BY_MATRIX){
-			double[][] paraQueryKLdivMat = new double[paraIList.size()][queryIList.size()];
-			int[] bestQueryForPara = new int[paraIList.size()];
-			double[] queryVals = new double[queryIList.size()];
-			for(int n=0; n<paraIList.size(); n++){
-				for(int m=0; m<queryIList.size(); m++){
-					paraQueryKLdivMat[n][m] = getKLdiv(queryTopicProbMatrix[m], paraTopicProbMatrix[n]);
-				}
-			}
-			
-			for(int n=0; n<paraIList.size(); n++){
-				int bestQueryInd=0;
-				double minVal = 99999.0;
-				queryVals = paraQueryKLdivMat[n];
-				for(int m=0; m<queryIList.size(); m++){
-					if(queryVals[m]<minVal){
-						bestQueryInd = m;
-						minVal = queryVals[m];
-					}
-				}
-				bestQueryForPara[n] = bestQueryInd;
-			}
-			boolean isDone = false;
-			double maxKLVal = getMaxVal(paraQueryKLdivMat);
-			int[] minInd = new int[2];
-			while(!isDone){
-				minInd = getMinValIndex(paraQueryKLdivMat, maxKLVal);
-				assign.get(queryIList.get(minInd[1])).add(paraIList.get(minInd[0]));
-				isParaAssigned[minInd[0]] = true;
-				for(int r=0; r<paraQueryKLdivMat.length; r++){
-					for(int c=0; c<paraQueryKLdivMat[0].length; c++){
-						if(r==minInd[0] || c==minInd[1])
-							paraQueryKLdivMat[r][c] = maxKLVal+1;
-					}
-				}	
-				isDone = checkIfDone(paraQueryKLdivMat, maxKLVal);
-			}
-			for(int n=0; n<isParaAssigned.length; n++){
-				if(!isParaAssigned[n])
-					assign.get(queryIList.get(bestQueryForPara[n])).add(paraIList.get(n));
-			}
-		} else{
-			for(int m=0; m<queryIList.size(); m++){
-				Instance queryIns = queryIList.get(m);
-				int bestParaInsIndex = 0;
-				double minKLDiv = 99999.0;
-				for(int n=0; n<paraIList.size(); n++){
-					if(!isParaAssigned[n]){
-						double currKLDiv = getKLdiv(queryTopicProbMatrix[m], paraTopicProbMatrix[n]);
-						if(currKLDiv<minKLDiv){
-							minKLDiv = currKLDiv;
-							bestParaInsIndex = n;
-						}
-					}
-				}
-				assign.get(queryIns).add(paraIList.get(bestParaInsIndex));
-				isParaAssigned[bestParaInsIndex] = true;
-			}
-			for(int p=0; p<paraIList.size(); p++){
-				if(!isParaAssigned[p]){
-					Instance bestQueryIns = queryIList.get(0);
-					double minKLDiv = 99999.0;
-					for(int q=0; q<queryIList.size(); q++){
-						double currKLDiv = getKLdiv(queryTopicProbMatrix[q], paraTopicProbMatrix[p]);
-						if(currKLDiv<minKLDiv){
-							minKLDiv = currKLDiv;
-							bestQueryIns = queryIList.get(q);
-						}
-					}
-					assign.get(bestQueryIns).add(paraIList.get(p));
-				}
-			}
-		}
+		matrixAssignment(assign, queryIList, paraIList, queryTopicProbMatrix, paraTopicProbMatrix);
 		HashMap<String, ArrayList<String>> assignment = convInsAssignToIDAssign(assign, page);
 		ResultForPage r = new ResultForPage();
 		r.setQueryParaAssignment(assignment);
@@ -593,93 +520,7 @@ public class SingleRun {
 			paraTopics[j] = umm.getTopicOfInstance(j);
 			paraTopicScores[j] = umm.getTopicScoresOfInstance(j);
 		}
-		boolean[] isParaAssigned = new boolean[paraIList.size()];
-		for(int pos=0; pos<isParaAssigned.length; pos++)
-			isParaAssigned[pos] = false;
-		/*
-		for(int m=0; m<queryIList.size(); m++){
-			Instance queryIns = queryIList.get(m);
-			int bestParaInsIndex = 0;
-			double minKLDiv = 99999.0;
-			for(int n=0; n<paraIList.size(); n++){
-				if(!isParaAssigned[n]){
-					double currKLDiv = getKLdiv(queryTopicProbMatrix[m], paraTopicProbMatrix[n]);
-					if(currKLDiv<minKLDiv){
-						minKLDiv = currKLDiv;
-						bestParaInsIndex = n;
-					}
-				}
-			}
-			assign.get(queryIns).add(paraIList.get(bestParaInsIndex));
-			isParaAssigned[bestParaInsIndex] = true;
-		}
-		for(int p=0; p<paraIList.size(); p++){
-			if(!isParaAssigned[p]){
-				Instance bestQueryIns = queryIList.get(0);
-				double minKLDiv = 99999.0;
-				for(int q=0; q<queryIList.size(); q++){
-					double currKLDiv = getKLdiv(queryTopicProbMatrix[q], paraTopicProbMatrix[p]);
-					if(currKLDiv<minKLDiv){
-						minKLDiv = currKLDiv;
-						bestQueryIns = queryIList.get(q);
-					}
-				}
-				assign.get(bestQueryIns).add(paraIList.get(p));
-			}
-		}
-		*/
-		if(RunExperiment.ASSIGN_BY_MATRIX){
-			double[][] paraQueryKLdivMat = new double[paraIList.size()][queryIList.size()];
-			int[] bestQueryForPara = new int[paraIList.size()];
-			double[] queryVals = new double[queryIList.size()];
-			for(int n=0; n<paraIList.size(); n++){
-				for(int m=0; m<queryIList.size(); m++)
-					paraQueryKLdivMat[n][m] = getKLdiv(queryTopicScores[m], paraTopicScores[n]);
-			}
-			for(int n=0; n<paraIList.size(); n++){
-				int bestQueryInd=0;
-				double minVal = 99999.0;
-				queryVals = paraQueryKLdivMat[n];
-				for(int m=0; m<queryIList.size(); m++){
-					if(queryVals[m]<minVal){
-						bestQueryInd = m;
-						minVal = queryVals[m];
-					}
-				}
-				bestQueryForPara[n] = bestQueryInd;
-			}
-			boolean isDone = false;
-			double maxKLVal = getMaxVal(paraQueryKLdivMat);
-			int[] minInd = new int[2];
-			while(!isDone){
-				minInd = getMinValIndex(paraQueryKLdivMat, maxKLVal);
-				assign.get(queryIList.get(minInd[1])).add(paraIList.get(minInd[0]));
-				isParaAssigned[minInd[0]] = true;
-				for(int r=0; r<paraQueryKLdivMat.length; r++){
-					for(int c=0; c<paraQueryKLdivMat[0].length; c++){
-						if(r==minInd[0] || c==minInd[1])
-							paraQueryKLdivMat[r][c] = maxKLVal+1;
-					}
-				}	
-				isDone = checkIfDone(paraQueryKLdivMat, maxKLVal);
-			}
-			for(int n=0; n<isParaAssigned.length; n++){
-				if(!isParaAssigned[n])
-					assign.get(queryIList.get(bestQueryForPara[n])).add(paraIList.get(n));
-			}
-		} else{
-			for(int q=0; q<queryTopics.length; q++){
-				Instance currQIns = queryIList.get(q);
-				for(int p=0; p<paraTopics.length; p++){
-					if(!isParaAssigned[p]){
-						if(queryTopics[q]==paraTopics[p]){
-							assign.get(currQIns).add(paraIList.get(p));
-							isParaAssigned[p] = true;
-						}
-					}
-				}
-			}
-		}
+		matrixAssignment(assign, queryIList, paraIList, queryTopicScores, paraTopicScores);
 		
 		HashMap<String, ArrayList<String>> assignment = convInsAssignToIDAssign(assign, page);
 		ResultForPage r = new ResultForPage();
@@ -689,50 +530,137 @@ public class SingleRun {
 	}
 	private ResultForPage assignUsingKMeans(InstanceList paraIList, InstanceList queryIList, 
 			Clustering clusters, CustomKMeans kmeans, Data.Page page){
+		boolean debug = false;
 		ResultForPage r = new ResultForPage();
 		HashMap<Instance, ArrayList<Instance>> insAssign = new HashMap<Instance, ArrayList<Instance>>();
-		double[][] queryClusterDistMat = getQueryClusterDistances(queryIList, clusters, kmeans, new NormalizedDotProductMetric());
+		for(Instance qIns:queryIList)
+			insAssign.put(qIns, new ArrayList<Instance>());
+		double[][] clusterQueryDistMat = getClusterQueryDistances(queryIList, clusters, kmeans, new NormalizedDotProductMetric());
+		
 		boolean[] isClusterAssigned = new boolean[clusters.getNumClusters()];
-		for(int i=0; i<isClusterAssigned.length; i++)
-			isClusterAssigned[i] = false;
-		while(hasFalse(isClusterAssigned)){
-			int qIndex=0, cIndex=0;
-			double minVal=9999999.0, val;
-			for(int i=0; i<queryClusterDistMat.length; i++){
-				for(int j=0; j<queryClusterDistMat[0].length; j++){
-					val = queryClusterDistMat[i][j];
-					if(val>0 && val<minVal){
-						minVal = val;
-						qIndex = i;
-						cIndex = j;
+		for(int pos=0; pos<isClusterAssigned.length; pos++)
+			isClusterAssigned[pos] = false;
+		int[] bestQueryForCluster = new int[clusters.getNumClusters()];
+		double[] queryVals = new double[queryIList.size()];
+		for(int n=0; n<clusters.getNumClusters(); n++){
+			int bestQueryInd=0;
+			double minVal = 99999.0;
+			queryVals = clusterQueryDistMat[n];
+			for(int m=0; m<queryIList.size(); m++){
+				if(queryVals[m]<minVal){
+					bestQueryInd = m;
+					minVal = queryVals[m];
+				}
+			}
+			bestQueryForCluster[n] = bestQueryInd;
+		}
+		if(debug){
+			InstanceList current;
+			for(int i=0; i<clusters.getNumClusters(); i++){
+				current = clusters.getCluster(i);
+				System.out.print("\nCluster index and label="+i+",size="+current.size()+" -> [");
+				for(Instance p:current){
+					System.out.print(p.getName()+" ");
+				}
+				System.out.print("]");
+			}
+		}
+		
+		InstanceList clusterIList;
+		while(!checkIfDone(clusterQueryDistMat)){
+			double minDist = 99999.0;
+			int mini=0, minj=0;
+			for(int i=0; i<clusterQueryDistMat.length; i++){
+				for(int j=0; j<clusterQueryDistMat[0].length; j++){
+					if(clusterQueryDistMat[i][j]>0 && clusterQueryDistMat[i][j]<minDist){
+						minDist = clusterQueryDistMat[i][j];
+						mini = i;
+						minj = j;
 					}
 				}
 			}
-			insAssign.put(queryIList.get(qIndex), clusters.getCluster(clusters.getLabel(cIndex)));
-			for(int i=0; i<queryClusterDistMat.length; i++)
-				queryClusterDistMat[i][cIndex] = -1;
-			isClusterAssigned[cIndex] = true;
+			clusterIList = clusters.getCluster(mini);
+			for(Instance paraIns:clusterIList)
+				insAssign.get(queryIList.get(minj)).add(paraIns);
+			isClusterAssigned[mini] = true;
+			if(debug){
+				System.out.println("\nCurrent state of insAssign");
+				for(Instance q:insAssign.keySet()){
+					System.out.println(insAssign.get(q).size()+" paras mapped");
+					System.out.print(q.getName()+" -> [");
+					for(Instance p:insAssign.get(q)){
+						System.out.print(p.getName()+" ");
+					}
+					System.out.print("]\n");
+				}
+			}
+			for(int i=0; i<clusterQueryDistMat.length; i++){
+				for(int j=0; j<clusterQueryDistMat[0].length; j++){
+					if(i==mini || j==minj)
+						clusterQueryDistMat[i][j] = -1;
+				}
+			}
 		}
+		
+		InstanceList currClusterIList;
+		for(int i=0; i<isClusterAssigned.length; i++){
+			int bestQuery;
+			if(!isClusterAssigned[i]){
+				currClusterIList = clusters.getCluster(i);
+				bestQuery = bestQueryForCluster[i];
+				for(Instance paraIns:currClusterIList)
+					insAssign.get(queryIList.get(bestQuery)).add(paraIns);
+				if(debug){
+					System.out.println("\nCurrent state of insAssign after initial loop");
+					for(Instance q:insAssign.keySet()){
+						System.out.println(insAssign.get(q).size()+" paras mapped");
+						System.out.print(q.getName()+" -> [");
+						for(Instance p:insAssign.get(q)){
+							System.out.print(p.getName()+" ");
+						}
+						System.out.print("]\n");
+					}
+				}
+			}
+		}
+		
 		HashMap<String, ArrayList<String>> assignment = convInsAssignToIDAssign(insAssign, page);
 		r.setQueryParaAssignment(assignment);
 		r.setParaClusters(formatClusterData(clusters));
 		return r;
 	}
-	private boolean hasFalse(boolean[] boolArray){
-		for(int i=0; i<boolArray.length; i++){
-			if(!boolArray[i])
-				return true;
+	public HashMap<Integer, SparseVector> getLabelledClusterMeans(Clustering clusters, CustomKMeans kmeans){
+		  HashMap<Integer, SparseVector> labelledMeans = new HashMap<Integer, SparseVector>();
+		  ArrayList<SparseVector> clusterMeans = kmeans.getClusterMeans();
+		  Metric metric = kmeans.getMetric();
+		  InstanceList currCluster;
+		  SparseVector mean;
+		  for(int c=0; c<clusters.getNumClusters(); c++){
+			  // c is label here
+			  currCluster = clusters.getCluster(c);
+			  mean = VectorStats.mean(currCluster);
+			  for(SparseVector cMean:clusterMeans){
+				  if(metric.distance(mean, cMean)<0.0000001)
+					  labelledMeans.put(c, cMean);
+			  }
+		  }
+		  return labelledMeans;
+	  }
+	private double[][] getClusterQueryDistances(InstanceList querylist, Clustering clusters, CustomKMeans kmeans, Metric metric){
+		SparseVector vec;
+		for(int q=0; q<querylist.size(); q++){
+			vec = (SparseVector) querylist.get(q).getData();
+			if(vec.numLocations()==0)
+				this.countNan++;
 		}
-		return false;
-	}
-	private double[][] getQueryClusterDistances(InstanceList querylist, Clustering clusters, CustomKMeans kmeans, Metric metric){
-		double[][] distanceMatrix = new double[querylist.size()][clusters.getNumClusters()];
+		double[][] distanceMatrix = new double [clusters.getNumClusters()][querylist.size()];
 		ArrayList<SparseVector> clusterMeans = kmeans.getClusterMeans();
-		Instance query;
-		for(int q=0; q<distanceMatrix.length; q++){
-			for(int c=0; c<distanceMatrix[0].length; c++)
-				distanceMatrix[q][c] = 
+		for(int c=0; c<distanceMatrix.length; c++){
+			for(int q=0; q<distanceMatrix[0].length; q++){
+				
+				distanceMatrix[c][q] = 
 				metric.distance(clusterMeans.get(c), (SparseVector) querylist.get(q).getData());
+			}
 		}
 		return distanceMatrix;
 	}
@@ -931,6 +859,64 @@ public class SingleRun {
 			}
 		}
 		return true;
+	}
+	public boolean checkIfDone(double[][] distMat){
+		for(int i=0; i<distMat.length; i++){
+			for(int j=0; j<distMat[0].length; j++){
+				if(!Double.isNaN(distMat[i][j]) && distMat[i][j]>0)
+					return false;
+			}
+		}
+		return true;
+	}
+	public void matrixAssignment(HashMap<Instance, ArrayList<Instance>> assign,
+			InstanceList queryIList, InstanceList paraIList, double[][] queryMat, double[][] paraMat){
+		double[][] paraQueryKLdivMat = new double[paraIList.size()][queryIList.size()];
+		for(int n=0; n<paraIList.size(); n++){
+			for(int m=0; m<queryIList.size(); m++){
+				paraQueryKLdivMat[n][m] = getKLdiv(queryMat[m], paraMat[n]);
+			}
+		}
+		matrixAssignment(assign, queryIList, paraIList, paraQueryKLdivMat);
+	}
+	public void matrixAssignment(HashMap<Instance, ArrayList<Instance>> assign,
+			InstanceList queryIList, InstanceList paraIList, double[][] paraQueryMatrix){
+		boolean[] isParaAssigned = new boolean[paraIList.size()];
+		for(int pos=0; pos<isParaAssigned.length; pos++)
+			isParaAssigned[pos] = false;
+		int[] bestQueryForPara = new int[paraIList.size()];
+		double[] queryVals = new double[queryIList.size()];
+		for(int n=0; n<paraIList.size(); n++){
+			int bestQueryInd=0;
+			double minVal = 99999.0;
+			queryVals = paraQueryMatrix[n];
+			for(int m=0; m<queryIList.size(); m++){
+				if(queryVals[m]<minVal){
+					bestQueryInd = m;
+					minVal = queryVals[m];
+				}
+			}
+			bestQueryForPara[n] = bestQueryInd;
+		}
+		boolean isDone = false;
+		double maxKLVal = getMaxVal(paraQueryMatrix);
+		int[] minInd = new int[2];
+		while(!isDone){
+			minInd = getMinValIndex(paraQueryMatrix, maxKLVal);
+			assign.get(queryIList.get(minInd[1])).add(paraIList.get(minInd[0]));
+			isParaAssigned[minInd[0]] = true;
+			for(int r=0; r<paraQueryMatrix.length; r++){
+				for(int c=0; c<paraQueryMatrix[0].length; c++){
+					if(r==minInd[0] || c==minInd[1])
+						paraQueryMatrix[r][c] = maxKLVal+1;
+				}
+			}	
+			isDone = checkIfDone(paraQueryMatrix, maxKLVal);
+		}
+		for(int n=0; n<isParaAssigned.length; n++){
+			if(!isParaAssigned[n])
+				assign.get(queryIList.get(bestQueryForPara[n])).add(paraIList.get(n));
+		}
 	}
 	public static Pipe buildPipe(int model){
 		if(model==1 || model==3)
