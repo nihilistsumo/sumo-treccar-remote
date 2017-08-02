@@ -16,8 +16,8 @@ public class PerformTrecEval {
 	public static final String GT_PATH = "/home/sumanta/Documents/new_research/unh/test200-v1.4/all.test200.cbor.toplevel.qrels";
 	
 	public static void main(String[] args){
-		String workDir = "/home/sumanta/Documents/new_research/unh/test200-v1.4results/results4paper/k";
-		String assign_filename = "klda_new_trec";
+		String workDir = "/home/sumanta/Documents/new_research/unh/test200-v1.4results/results4paper/kmeans";
+		String assign_filename = "kkmeans_trec";
 		PerformTrecEval pte = new PerformTrecEval();
 		HashSet<String> runids = pte.getRunIDs(workDir+"/"+assign_filename);
 		String tempFilepath = workDir+"/temp";

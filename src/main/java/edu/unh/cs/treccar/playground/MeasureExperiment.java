@@ -83,6 +83,10 @@ public class MeasureExperiment {
 			ArrayList<ArrayList<String>> clusters = r.getParaClusters();
 			ArrayList<ArrayList<String>> currGTClusters = new ArrayList<ArrayList<String>>();
 			for(String gtQuery:gt.keySet()){
+				if(pageID.equals("Whole%20Corpus")){
+					currGTClusters = new ArrayList<ArrayList<String>>(gt.values());
+					break;
+				}
 				if(gtQuery.startsWith(pageID))
 					currGTClusters.add(gt.get(gtQuery));
 			}

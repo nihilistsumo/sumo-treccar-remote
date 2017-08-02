@@ -6,11 +6,11 @@ import com.trolltech.qt.gui.*;
 
 public class RunExperiment {
 	// k0beta_umm
-	public static final boolean SAVE_RESULT = true;
-	public static final String CLUSTERING_MEASURE_FILENAME = "klda_new";
-	public static final String TRECEVAL_ASSIGN_FILENAME = "klda_new_trec";
+	public static final boolean SAVE_RESULT = false;
+	public static final String CLUSTERING_MEASURE_FILENAME = "kkmeans";
+	public static final String TRECEVAL_ASSIGN_FILENAME = "kkmeans_trec";
 	public static final boolean RUN_BY_PAGE = true;
-	//public static final boolean ASSIGN_BY_MATRIX = true;
+	public static final boolean ASSIGN_RANK_MODE = true;
 	public static final boolean SMOOTHED_UMM = false;
 	
 	public static void main(String[] args) {
@@ -25,14 +25,14 @@ public class RunExperiment {
 
         QApplication.execStatic();
         */
-        String model = "1";
+        String model = "3";
         // 1 for LDA, 2 for kmeans, 3 for unigram tm
         String tw = "0"; // currently ignored
-        String startK="0", startIter="100", startAlpha="1.0", startBeta="260"; 
+        String startK="0", startIter="50", startAlpha="1.0", startBeta="260"; 
         // treat alpha and beta as alphaSum and betaSum
         String stopK=startK, stopIter=startIter, stopAlpha=startAlpha, stopBeta=startBeta;
         String stepK="1", stepIter="1", stepAlpha="1", stepBeta="1";
-        boolean[] isVar = {true, false, false, false};
+        boolean[] isVar = {false, false, false, false};
         if(isVar[0]){
         	stopK = "20";
         	stepK = "1";
@@ -46,8 +46,8 @@ public class RunExperiment {
         	stepAlpha = "0.05";
         }
         if(isVar[3]){
-        	stopBeta = "150";
-        	stepBeta = "25";
+        	stopBeta = "560";
+        	stepBeta = "50";
         }
         for(int a=Integer.parseInt(startK); !(a>Integer.parseInt(stopK)); a+=Integer.parseInt(stepK)){
         	for(int b=Integer.parseInt(startIter); !(b>Integer.parseInt(stopIter)); b+=Integer.parseInt(stepIter)){
@@ -59,7 +59,7 @@ public class RunExperiment {
         		        		"/home/sumanta/Documents/new_research/unh/test200-v1.4/all.test200.cbor.outlines",
         		        		"/home/sumanta/Documents/new_research/unh/test200-v1.4/all.test200.cbor.toplevel.qrels",
         		        		"/home/sumanta/Documents/new_research/unh/test200-v1.4/all.test200.cbor.article.qrels",
-        		        		"/home/sumanta/Documents/new_research/unh/test200-v1.4results/results4paper/k"});
+        		        		"/home/sumanta/Documents/new_research/unh/test200-v1.4results/results4paper/kmeans"});
         		        if(RunExperiment.RUN_BY_PAGE)
         		        	sr.runExperiment();
         		        else

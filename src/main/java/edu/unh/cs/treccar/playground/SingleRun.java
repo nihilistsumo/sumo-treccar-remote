@@ -28,6 +28,7 @@ import cc.mallet.pipe.TokenSequenceLowercase;
 import cc.mallet.pipe.TokenSequenceRemoveStopwords;
 import cc.mallet.topics.TopicAssignment;
 import cc.mallet.topics.TopicInferencer;
+import cc.mallet.types.FeatureSequence;
 import cc.mallet.types.Instance;
 import cc.mallet.types.InstanceList;
 import cc.mallet.types.Metric;
@@ -45,6 +46,7 @@ import edu.unh.cs.treccar.read_data.DeserializeData.RuntimeCborException;
 
 public class SingleRun {
 	int k, numIter, model, tw, countNan=0;
+	ArrayList<String> nanIns = new ArrayList<String>();
 	double alphaSum, betaSum;
 	String paraPath, outlinePath, gtPath, articleQrelsPath, outputPath;
 	private HashMap<String, ArrayList<String>> gtSecParaMap = null;
@@ -99,7 +101,7 @@ public class SingleRun {
 			InstanceList paraIList = convertParasToIList(paraObjects);
 			ArrayList<String> queryIDs = getqueryIDs(page);
 			InstanceList qIList = convertQueriesToIList(queryIDs);
-			ResultForPage resultPage = getAssignment(paraIList, qIList, page);
+			ResultForPage resultPage = modelAndAssign(paraIList, qIList, page); // clustering and assignments done here
 			resultPerPageID.put(pageID, resultPage);
 			
 			//-- Error Checking and book keeping codes --//
@@ -128,6 +130,7 @@ public class SingleRun {
 			}
 			//-- ############################################# --//
 		}
+		/*
 		if(RunExperiment.SAVE_RESULT){
 			try{
 				String runid;
@@ -149,6 +152,8 @@ public class SingleRun {
 				e.printStackTrace();
 			}
 		}
+		*/
+		
 		// Measure performance from resultPerPageID and store result
 		MeasureExperiment me = new MeasureExperiment(resultPerPageID, this.gtSecParaMap);
 		pageRAND = me.calculateRANDPerPage();
@@ -187,12 +192,30 @@ public class SingleRun {
 		stdDevP = Math.sqrt((sumSqrDevP/pagePurity.size()));
 		stderrPurity = stdDevP/Math.sqrt(pagePurity.size());
 		System.out.println("Mean RAND = "+meanRAND+", mean Purity = "+meanPurity);
-		System.out.println("NAN sections: "+this.countNan);
+		System.out.println("NAN Instances: "+this.countNan);
+		for(String nan:this.nanIns)
+			System.out.println(nan);
 		if(RunExperiment.SAVE_RESULT){
 			try {
 				FileWriter fw = new FileWriter(this.outputPath+"/"+RunExperiment.CLUSTERING_MEASURE_FILENAME, true);
 				fw.write(this.k+" "+this.numIter+" "+this.model+" "+this.tw+" "+this.alphaSum+" "+this.betaSum+" "+meanRAND+" "+stderrRAND+" "+meanPurity+" "+stderrPurity+"\n");
 				fw.close();
+				
+				String runid;
+				if(this.model==3)
+					runid = "run"+this.k+this.numIter+this.model+this.betaSum+RunExperiment.SMOOTHED_UMM;
+				else
+					runid = "run"+this.k+this.numIter+this.model+this.tw+this.alphaSum+this.betaSum;
+				FileWriter fw2 = new FileWriter(this.outputPath+"/"+RunExperiment.TRECEVAL_ASSIGN_FILENAME, true);
+				for(String p:resultPerPageID.keySet()){
+					HashMap<String, ArrayList<String>> currQParaAssign = resultPerPageID.get(p).getQueryParaAssignment();
+					for(String q:currQParaAssign.keySet()){
+						ArrayList<String> candParaIDs = currQParaAssign.get(q);
+						for(String para:candParaIDs)
+							fw2.write(q+" 0 "+para+" 0 1 "+runid+"\n");
+					}
+				}
+				fw2.close();
 			} catch (IOException e) {
 				// TODO Auto-generated catch block
 				e.printStackTrace();
@@ -209,7 +232,7 @@ public class SingleRun {
 			queryids.add(p.getPageId());
 		InstanceList paraIList = convertParasToIList(this.paraList);
 		InstanceList qIList = convertQueriesToIList(queryids);
-		resultForCorpus.put(corpus.getPageId(), getAssignment(paraIList, qIList, corpus));
+		resultForCorpus.put(corpus.getPageId(), modelAndAssign(paraIList, qIList, corpus));
 		HashMap<String, ArrayList<String>> currQParaAssign = resultForCorpus.get(corpus.getPageId()).getQueryParaAssignment();
 		
 		// Measure performance from resultPerPageID and store result
@@ -237,7 +260,7 @@ public class SingleRun {
 			}
 		}
 	}
-	private ResultForPage getAssignment(InstanceList paraIList, InstanceList queryIList, Data.Page currPage){
+	private ResultForPage modelAndAssign(InstanceList paraIList, InstanceList queryIList, Data.Page currPage){
 		//HashMap<String, ArrayList<String>> assignment = new HashMap<String, ArrayList<String>>();
 		ResultForPage result = new ResultForPage();
 		switch(this.model){
@@ -245,27 +268,11 @@ public class SingleRun {
 			//topic
 			int numTopics;
 			if(this.k==0){
-				/*
-				if(queryIList.size()>paraIList.size()){
-					numTopics = paraIList.size();
-					System.out.println("K was "+queryIList.size()+", but we've reduced it to be paralist size "+numTopics);
-				} else{
-					numTopics = queryIList.size();
-					System.out.println("K "+numTopics);
-				}
-				*/
+				
 				numTopics = queryIList.size();
 				System.out.println("K "+numTopics);
 			} else{
-				/*
-				if(this.k>paraIList.size()){
-					numTopics = paraIList.size();
-					System.out.println("K was "+this.k+", but we've reduced it to be paralist size "+numTopics);
-				} else{
-					numTopics = this.k;
-					System.out.println("K "+numTopics);
-				}
-				*/
+				
 				if(this.k>=paraIList.size()){
 					numTopics = paraIList.size();
 					System.out.println("K "+numTopics);
@@ -278,9 +285,6 @@ public class SingleRun {
 			try {
 				lda.addInstances(paraIList);
 				lda.sample(this.numIter);
-				//lda.addInstancesUnigram(paraIList);
-				//lda.sampleUMM(this.numIter);
-				//System.out.println(lda.topWords(10));
 				result = assignUsingLDA(paraIList, queryIList, lda, currPage);
 				
 			} catch (Exception e) {
@@ -314,27 +318,11 @@ public class SingleRun {
 			//unigram topic
 			int numTopicsUMM;
 			if(this.k==0){
-				/*
-				if(queryIList.size()>paraIList.size()){
-					numTopics = paraIList.size();
-					System.out.println("K was "+queryIList.size()+", but we've reduced it to be paralist size "+numTopics);
-				} else{
-					numTopics = queryIList.size();
-					System.out.println("K "+numTopics);
-				}
-				*/
+				
 				numTopicsUMM = queryIList.size();
 				System.out.println("K "+numTopicsUMM);
 			} else{
-				/*
-				if(this.k>paraIList.size()){
-					numTopics = paraIList.size();
-					System.out.println("K was "+this.k+", but we've reduced it to be paralist size "+numTopics);
-				} else{
-					numTopics = this.k;
-					System.out.println("K "+numTopics);
-				}
-				*/
+				
 				if(this.k>=paraIList.size()){
 					numTopicsUMM = paraIList.size();
 					System.out.println("K "+numTopicsUMM);
@@ -505,8 +493,14 @@ public class SingleRun {
 		double[][] queryTopicScores = new double[queryIList.size()][umm.getNumTopics()];
 		int[] paraTopics = new int[paraIList.size()];
 		double[][] paraTopicScores = new double[paraIList.size()][umm.getNumTopics()];
+		FeatureSequence fet;
 		for(int i=0; i<queryIList.size(); i++){
 			Instance queryIns = queryIList.get(i);
+			fet = (FeatureSequence) queryIns.getData();
+			if(fet.size()==0){
+				this.countNan++;
+				this.nanIns.add(queryIns.getName().toString());
+			}
 			//System.out.println("Page ID: "+page.getPageId());
 			queryTopics[i] = inf.inferInstanceTopic(queryIns, numIterForInf, thinningForInf, burninForInf);
 			queryTopicScores[i] = inf.inferInstanceTopicScores(queryIns, numIterForInf, thinningForInf, burninForInf);
@@ -535,94 +529,10 @@ public class SingleRun {
 		HashMap<Instance, ArrayList<Instance>> insAssign = new HashMap<Instance, ArrayList<Instance>>();
 		for(Instance qIns:queryIList)
 			insAssign.put(qIns, new ArrayList<Instance>());
-		double[][] clusterQueryDistMat = getClusterQueryDistances(queryIList, clusters, kmeans, new NormalizedDotProductMetric());
-		
-		boolean[] isClusterAssigned = new boolean[clusters.getNumClusters()];
-		for(int pos=0; pos<isClusterAssigned.length; pos++)
-			isClusterAssigned[pos] = false;
-		int[] bestQueryForCluster = new int[clusters.getNumClusters()];
-		double[] queryVals = new double[queryIList.size()];
-		for(int n=0; n<clusters.getNumClusters(); n++){
-			int bestQueryInd=0;
-			double minVal = 99999.0;
-			queryVals = clusterQueryDistMat[n];
-			for(int m=0; m<queryIList.size(); m++){
-				if(queryVals[m]<minVal){
-					bestQueryInd = m;
-					minVal = queryVals[m];
-				}
-			}
-			bestQueryForCluster[n] = bestQueryInd;
-		}
-		if(debug){
-			InstanceList current;
-			for(int i=0; i<clusters.getNumClusters(); i++){
-				current = clusters.getCluster(i);
-				System.out.print("\nCluster index and label="+i+",size="+current.size()+" -> [");
-				for(Instance p:current){
-					System.out.print(p.getName()+" ");
-				}
-				System.out.print("]");
-			}
-		}
-		
-		InstanceList clusterIList;
-		while(!checkIfDone(clusterQueryDistMat)){
-			double minDist = 99999.0;
-			int mini=0, minj=0;
-			for(int i=0; i<clusterQueryDistMat.length; i++){
-				for(int j=0; j<clusterQueryDistMat[0].length; j++){
-					if(clusterQueryDistMat[i][j]>0 && clusterQueryDistMat[i][j]<minDist){
-						minDist = clusterQueryDistMat[i][j];
-						mini = i;
-						minj = j;
-					}
-				}
-			}
-			clusterIList = clusters.getCluster(mini);
-			for(Instance paraIns:clusterIList)
-				insAssign.get(queryIList.get(minj)).add(paraIns);
-			isClusterAssigned[mini] = true;
-			if(debug){
-				System.out.println("\nCurrent state of insAssign");
-				for(Instance q:insAssign.keySet()){
-					System.out.println(insAssign.get(q).size()+" paras mapped");
-					System.out.print(q.getName()+" -> [");
-					for(Instance p:insAssign.get(q)){
-						System.out.print(p.getName()+" ");
-					}
-					System.out.print("]\n");
-				}
-			}
-			for(int i=0; i<clusterQueryDistMat.length; i++){
-				for(int j=0; j<clusterQueryDistMat[0].length; j++){
-					if(i==mini || j==minj)
-						clusterQueryDistMat[i][j] = -1;
-				}
-			}
-		}
-		
-		InstanceList currClusterIList;
-		for(int i=0; i<isClusterAssigned.length; i++){
-			int bestQuery;
-			if(!isClusterAssigned[i]){
-				currClusterIList = clusters.getCluster(i);
-				bestQuery = bestQueryForCluster[i];
-				for(Instance paraIns:currClusterIList)
-					insAssign.get(queryIList.get(bestQuery)).add(paraIns);
-				if(debug){
-					System.out.println("\nCurrent state of insAssign after initial loop");
-					for(Instance q:insAssign.keySet()){
-						System.out.println(insAssign.get(q).size()+" paras mapped");
-						System.out.print(q.getName()+" -> [");
-						for(Instance p:insAssign.get(q)){
-							System.out.print(p.getName()+" ");
-						}
-						System.out.print("]\n");
-					}
-				}
-			}
-		}
+		double[][] queryClusterDistMat = transposeMatrix(getClusterQueryDistances(queryIList, clusters, kmeans, new NormalizedDotProductMetric()));
+		double[][] paraClusterDistMat = transposeMatrix(getClusterQueryDistances(paraIList, clusters, kmeans, new NormalizedDotProductMetric()));
+	
+		matrixAssignment(insAssign, queryIList, paraIList, queryClusterDistMat, paraClusterDistMat);
 		
 		HashMap<String, ArrayList<String>> assignment = convInsAssignToIDAssign(insAssign, page);
 		r.setQueryParaAssignment(assignment);
@@ -646,20 +556,24 @@ public class SingleRun {
 		  }
 		  return labelledMeans;
 	  }
-	private double[][] getClusterQueryDistances(InstanceList querylist, Clustering clusters, CustomKMeans kmeans, Metric metric){
+	private double[][] getClusterQueryDistances(InstanceList inslist, Clustering clusters, CustomKMeans kmeans, Metric metric){
 		SparseVector vec;
-		for(int q=0; q<querylist.size(); q++){
-			vec = (SparseVector) querylist.get(q).getData();
-			if(vec.numLocations()==0)
+		Instance i;
+		for(int ins=0; ins<inslist.size(); ins++){
+			i = inslist.get(ins);
+			vec = (SparseVector) i.getData();
+			if(vec.numLocations()==0){
 				this.countNan++;
+				this.nanIns.add(i.getName().toString());
+			}
 		}
-		double[][] distanceMatrix = new double [clusters.getNumClusters()][querylist.size()];
+		double[][] distanceMatrix = new double [clusters.getNumClusters()][inslist.size()];
 		ArrayList<SparseVector> clusterMeans = kmeans.getClusterMeans();
 		for(int c=0; c<distanceMatrix.length; c++){
-			for(int q=0; q<distanceMatrix[0].length; q++){
+			for(int ins=0; ins<distanceMatrix[0].length; ins++){
 				
-				distanceMatrix[c][q] = 
-				metric.distance(clusterMeans.get(c), (SparseVector) querylist.get(q).getData());
+				distanceMatrix[c][ins] = 
+				metric.distance(clusterMeans.get(c), (SparseVector) inslist.get(ins).getData());
 			}
 		}
 		return distanceMatrix;
@@ -868,6 +782,14 @@ public class SingleRun {
 			}
 		}
 		return true;
+	}
+	private double[][] transposeMatrix(double[][] matrix){
+		double[][] transposed = new double[matrix[0].length][matrix.length];
+		for(int r=0; r<transposed.length; r++){
+			for(int c=0; c<transposed[0].length; c++)
+				transposed[r][c] = matrix[c][r];
+		}
+		return transposed;
 	}
 	public void matrixAssignment(HashMap<Instance, ArrayList<Instance>> assign,
 			InstanceList queryIList, InstanceList paraIList, double[][] queryMat, double[][] paraMat){
