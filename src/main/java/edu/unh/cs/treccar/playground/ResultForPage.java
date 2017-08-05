@@ -6,6 +6,13 @@ import java.util.HashMap;
 public class ResultForPage {
 	private HashMap<String, ArrayList<String>> queryParaAssignment;
 	private ArrayList<ArrayList<String>> paraClusters;
+	private HashMap<ArrayList<String>, Double> queryParaRank;
+	public HashMap<ArrayList<String>, Double> getQueryParaRank() {
+		return queryParaRank;
+	}
+	public void setQueryParaRank(HashMap<ArrayList<String>, Double> queryParaRank) {
+		this.queryParaRank = queryParaRank;
+	}
 	public HashMap<String, ArrayList<String>> getQueryParaAssignment() {
 		return queryParaAssignment;
 	}

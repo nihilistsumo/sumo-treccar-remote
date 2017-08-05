@@ -12,6 +12,7 @@ import java.util.Arrays;
 import java.util.DoubleSummaryStatistics;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Random;
 import java.util.Set;
@@ -45,7 +46,7 @@ import edu.unh.cs.treccar.read_data.DeserializeData;
 import edu.unh.cs.treccar.read_data.DeserializeData.RuntimeCborException;
 
 public class SingleRun {
-	int k, numIter, model, tw, countNan=0;
+	int k, numIter, model, tw, countNan=0, removed=0;
 	ArrayList<String> nanIns = new ArrayList<String>();
 	double alphaSum, betaSum;
 	String paraPath, outlinePath, gtPath, articleQrelsPath, outputPath;
@@ -84,6 +85,29 @@ public class SingleRun {
 					",betaSum="+this.betaSum);
 		}
 	}
+	private void removeEmptyInstances(InstanceList iList){
+		Iterator<Instance> iListIter = iList.iterator();
+		if(iList.getDataClass()==FeatureSequence.class){
+			FeatureSequence fet;
+			
+			while(iListIter.hasNext()){
+				fet = (FeatureSequence) iListIter.next().getData();
+				if(fet.getLength()==0){
+					iListIter.remove();
+					removed++;
+				}
+			}
+		} else{
+			SparseVector sv;
+			while(iListIter.hasNext()){
+				sv = (SparseVector) iListIter.next().getData();
+				if(sv.numLocations()==0){
+					iListIter.remove();
+					removed++;
+				}
+			}
+		}
+	}
 	public void runExperiment(){
 		HashMap<String, ResultForPage> resultPerPageID = new HashMap<String, ResultForPage>();
 		int[] luckyPageids = {5, 25, 35};
@@ -95,12 +119,16 @@ public class SingleRun {
 				continue;
 			*/
 			String pageID = page.getPageId();
+			if(pageID.startsWith("Moment%20magnitude"))
+				System.out.println();
 			System.out.println("PAGE ID: "+pageID);
 			ArrayList<String> paraIDs = this.articleParaMap.get(pageID);
 			ArrayList<Data.Paragraph> paraObjects = getParasFromIDs(paraIDs);
 			InstanceList paraIList = convertParasToIList(paraObjects);
 			ArrayList<String> queryIDs = getqueryIDs(page);
 			InstanceList qIList = convertQueriesToIList(queryIDs);
+			removeEmptyInstances(qIList);
+			removeEmptyInstances(paraIList);
 			ResultForPage resultPage = modelAndAssign(paraIList, qIList, page); // clustering and assignments done here
 			resultPerPageID.put(pageID, resultPage);
 			
@@ -192,9 +220,10 @@ public class SingleRun {
 		stdDevP = Math.sqrt((sumSqrDevP/pagePurity.size()));
 		stderrPurity = stdDevP/Math.sqrt(pagePurity.size());
 		System.out.println("Mean RAND = "+meanRAND+", mean Purity = "+meanPurity);
-		System.out.println("NAN Instances: "+this.countNan);
-		for(String nan:this.nanIns)
-			System.out.println(nan);
+		//System.out.println("NAN Instances: "+this.countNan);
+		//for(String nan:this.nanIns)
+			//System.out.println(nan);
+		System.out.println("No. of removed instances: "+removed);
 		if(RunExperiment.SAVE_RESULT){
 			try {
 				FileWriter fw = new FileWriter(this.outputPath+"/"+RunExperiment.CLUSTERING_MEASURE_FILENAME, true);
@@ -208,11 +237,20 @@ public class SingleRun {
 					runid = "run"+this.k+this.numIter+this.model+this.tw+this.alphaSum+this.betaSum;
 				FileWriter fw2 = new FileWriter(this.outputPath+"/"+RunExperiment.TRECEVAL_ASSIGN_FILENAME, true);
 				for(String p:resultPerPageID.keySet()){
+					if(p.equals("Miko"))
+						System.out.println("Debug here");
 					HashMap<String, ArrayList<String>> currQParaAssign = resultPerPageID.get(p).getQueryParaAssignment();
-					for(String q:currQParaAssign.keySet()){
-						ArrayList<String> candParaIDs = currQParaAssign.get(q);
-						for(String para:candParaIDs)
-							fw2.write(q+" 0 "+para+" 0 1 "+runid+"\n");
+					HashMap<ArrayList<String>, Double> currQParaRank = resultPerPageID.get(p).getQueryParaRank();
+					if(!RunExperiment.ASSIGN_RANK_MODE){
+						for(String q:currQParaAssign.keySet()){
+							ArrayList<String> candParaIDs = currQParaAssign.get(q);
+							for(String para:candParaIDs)
+								fw2.write(q+" 0 "+para+" 0 1 "+runid+"\n");
+							// (query-id ignore document-id ignore rank-score runid)
+						}
+					} else{
+						for(ArrayList<String> qp:currQParaRank.keySet())
+							fw2.write(qp.get(0)+" 0 "+qp.get(1)+" 0 "+currQParaRank.get(qp)+" "+runid+"\n");
 					}
 				}
 				fw2.close();
@@ -222,6 +260,7 @@ public class SingleRun {
 			}
 		}
 	}
+	
 	public void runExperimentWholeCorpus(){
 		HashMap<String, ResultForPage> resultForCorpus = new HashMap<String, ResultForPage>();
 		List<Data.PageSkeleton> dummySkeleton = pageList.get(0).getSkeleton();
@@ -232,6 +271,7 @@ public class SingleRun {
 			queryids.add(p.getPageId());
 		InstanceList paraIList = convertParasToIList(this.paraList);
 		InstanceList qIList = convertQueriesToIList(queryids);
+		removeEmptyInstances(qIList);
 		resultForCorpus.put(corpus.getPageId(), modelAndAssign(paraIList, qIList, corpus));
 		HashMap<String, ArrayList<String>> currQParaAssign = resultForCorpus.get(corpus.getPageId()).getQueryParaAssignment();
 		
@@ -372,6 +412,23 @@ public class SingleRun {
 		}
 		return idAssign;
 	}
+	private HashMap<ArrayList<String>, Double> convRanksToIDRanks(HashMap<ArrayList<Instance>, Double> ranks, Data.Page page){
+		HashMap<ArrayList<String>, Double> idRanks = new HashMap<ArrayList<String>, Double>();
+		String pageID = page.getPageId();
+		String q,p;
+		ArrayList<String> rankKey;
+		for(ArrayList<Instance> sp:ranks.keySet()){
+			q = sp.get(0).getName().toString();
+			p = sp.get(1).getName().toString();
+			if(!q.equals(pageID))
+				q = pageID+"/"+q;
+			rankKey = new ArrayList<String>();
+			rankKey.add(0, q);
+			rankKey.add(1, p);
+			idRanks.put(rankKey, ranks.get(sp));
+		}
+		return idRanks;
+	}
 	private ResultForPage assignUsingAllCorrect(InstanceList paraIList, InstanceList queryIList, Data.Page page){
 		HashMap<String, ArrayList<String>> assign = new HashMap<String, ArrayList<String>>();
 		ArrayList<ArrayList<String>> paraClusters = new ArrayList<ArrayList<String>>();
@@ -451,9 +508,10 @@ public class SingleRun {
 	}
 	private ResultForPage assignUsingLDA(InstanceList paraIList, InstanceList queryIList, CustomLDA lda, Data.Page page) throws Exception{
 		HashMap<Instance, ArrayList<Instance>> assign = new HashMap<Instance, ArrayList<Instance>>();
+		HashMap<ArrayList<Instance>, Double> ranks = new HashMap<ArrayList<Instance>, Double>();
+		FeatureSequence fet;
 		for(Instance qIns:queryIList)
 			assign.put(qIns, new ArrayList<Instance>());
-		
 		TopicInferencer inf = lda.getInferencer();
 		int numIterForInf = 30;
 		int thinningForInf = 1;
@@ -473,18 +531,20 @@ public class SingleRun {
 				throw new Exception("paraIList indices are not following the same order as lda instances");
 			paraTopicProbMatrix[j] = lda.getTopicProbabilities(j);
 		}
-		matrixAssignment(assign, queryIList, paraIList, queryTopicProbMatrix, paraTopicProbMatrix);
+		matrixAssignment(assign, ranks, queryIList, paraIList, queryTopicProbMatrix, paraTopicProbMatrix);
 		HashMap<String, ArrayList<String>> assignment = convInsAssignToIDAssign(assign, page);
+		HashMap<ArrayList<String>, Double> idRanks = convRanksToIDRanks(ranks, page);
 		ResultForPage r = new ResultForPage();
 		r.setQueryParaAssignment(assignment);
+		r.setQueryParaRank(idRanks);
 		r.setParaClusters(getParasClustersFromMatrix(paraTopicProbMatrix, paraIList, lda.getNumTopics()));
 		return r;
 	}
 	private ResultForPage assignUsingUMM(InstanceList paraIList, InstanceList queryIList, UnigramTopicModel umm, Data.Page page) throws Exception{
 		HashMap<Instance, ArrayList<Instance>> assign = new HashMap<Instance, ArrayList<Instance>>();
+		HashMap<ArrayList<Instance>, Double> ranks = new HashMap<ArrayList<Instance>, Double>();
 		for(Instance qIns:queryIList)
 			assign.put(qIns, new ArrayList<Instance>());
-		
 		UnigramTopicInferencer inf = umm.getInferencer();
 		int numIterForInf = 30;
 		int thinningForInf = 1;
@@ -493,14 +553,15 @@ public class SingleRun {
 		double[][] queryTopicScores = new double[queryIList.size()][umm.getNumTopics()];
 		int[] paraTopics = new int[paraIList.size()];
 		double[][] paraTopicScores = new double[paraIList.size()][umm.getNumTopics()];
-		FeatureSequence fet;
 		for(int i=0; i<queryIList.size(); i++){
 			Instance queryIns = queryIList.get(i);
+			/*
 			fet = (FeatureSequence) queryIns.getData();
 			if(fet.size()==0){
 				this.countNan++;
 				this.nanIns.add(queryIns.getName().toString());
 			}
+			*/
 			//System.out.println("Page ID: "+page.getPageId());
 			queryTopics[i] = inf.inferInstanceTopic(queryIns, numIterForInf, thinningForInf, burninForInf);
 			queryTopicScores[i] = inf.inferInstanceTopicScores(queryIns, numIterForInf, thinningForInf, burninForInf);
@@ -514,11 +575,13 @@ public class SingleRun {
 			paraTopics[j] = umm.getTopicOfInstance(j);
 			paraTopicScores[j] = umm.getTopicScoresOfInstance(j);
 		}
-		matrixAssignment(assign, queryIList, paraIList, queryTopicScores, paraTopicScores);
+		matrixAssignment(assign, ranks, queryIList, paraIList, queryTopicScores, paraTopicScores);
 		
 		HashMap<String, ArrayList<String>> assignment = convInsAssignToIDAssign(assign, page);
+		HashMap<ArrayList<String>, Double> idRanks = convRanksToIDRanks(ranks, page);
 		ResultForPage r = new ResultForPage();
 		r.setQueryParaAssignment(assignment);
+		r.setQueryParaRank(idRanks);
 		r.setParaClusters(getParasClustersFromParatopics(paraTopics, paraIList, umm.getNumTopics()));
 		return r;
 	}
@@ -527,15 +590,19 @@ public class SingleRun {
 		boolean debug = false;
 		ResultForPage r = new ResultForPage();
 		HashMap<Instance, ArrayList<Instance>> insAssign = new HashMap<Instance, ArrayList<Instance>>();
+		HashMap<ArrayList<Instance>, Double> ranks = new HashMap<ArrayList<Instance>, Double>();
 		for(Instance qIns:queryIList)
 			insAssign.put(qIns, new ArrayList<Instance>());
 		double[][] queryClusterDistMat = transposeMatrix(getClusterQueryDistances(queryIList, clusters, kmeans, new NormalizedDotProductMetric()));
 		double[][] paraClusterDistMat = transposeMatrix(getClusterQueryDistances(paraIList, clusters, kmeans, new NormalizedDotProductMetric()));
 	
-		matrixAssignment(insAssign, queryIList, paraIList, queryClusterDistMat, paraClusterDistMat);
+		//matrixAssignment(insAssign, ranks, queryIList, paraIList, queryClusterDistMat, paraClusterDistMat);
+		matrixAssignmentKM(insAssign, ranks, queryIList, paraIList, queryClusterDistMat, paraClusterDistMat);
 		
 		HashMap<String, ArrayList<String>> assignment = convInsAssignToIDAssign(insAssign, page);
+		HashMap<ArrayList<String>, Double> idRanks = convRanksToIDRanks(ranks, page);
 		r.setQueryParaAssignment(assignment);
+		r.setQueryParaRank(idRanks);
 		r.setParaClusters(formatClusterData(clusters));
 		return r;
 	}
@@ -569,11 +636,14 @@ public class SingleRun {
 		}
 		double[][] distanceMatrix = new double [clusters.getNumClusters()][inslist.size()];
 		ArrayList<SparseVector> clusterMeans = kmeans.getClusterMeans();
+		double dist;
 		for(int c=0; c<distanceMatrix.length; c++){
 			for(int ins=0; ins<distanceMatrix[0].length; ins++){
-				
-				distanceMatrix[c][ins] = 
-				metric.distance(clusterMeans.get(c), (SparseVector) inslist.get(ins).getData());
+				dist = metric.distance(clusterMeans.get(c), (SparseVector) inslist.get(ins).getData());
+				if(dist<0.0000001)
+					System.out.println("ins no. "+ins+":"+
+				inslist.get(ins).getName().toString()+" -- "+"cluster "+c+" dist is "+dist);
+				distanceMatrix[c][ins] = dist;
 			}
 		}
 		return distanceMatrix;
@@ -791,18 +861,120 @@ public class SingleRun {
 		}
 		return transposed;
 	}
-	public void matrixAssignment(HashMap<Instance, ArrayList<Instance>> assign,
+	private double[][] normalizeMatrix(double[][] mat){ // normalize each row of mat to 1
+		int rowCnt = mat.length;
+		int colCnt = mat[0].length;
+		double rowSum;
+		double[][] norm = new double[rowCnt][colCnt];
+		for(int i=0; i<rowCnt; i++){
+			rowSum = 0;
+			for(int j=0; j<colCnt; j++)
+				rowSum+=mat[i][j];
+			for(int j=0; j<colCnt; j++)
+				norm[i][j] = mat[i][j]/rowSum;
+		}
+		return norm;
+	}
+	private double[][] reciprocMatrix(double[][] mat){ // recip[x][y] = (sum of mat[x])/mat[x][y]
+		int rowCnt = mat.length;
+		int colCnt = mat[0].length;
+		double rowSum;
+		boolean gotNaN;
+		double[][] recip = new double[rowCnt][colCnt];
+		for(int i=0; i<rowCnt; i++){
+			rowSum = 0;
+			gotNaN = false;
+			for(int j=0; j<colCnt; j++)
+				rowSum+=mat[i][j];
+			for(int j=0; j<colCnt; j++){
+				if(mat[i][j]<0.00001){
+					gotNaN = true;
+					break;
+				}
+				recip[i][j] = rowSum/mat[i][j];
+			}
+			if(gotNaN){
+				for(int j=0; j<colCnt; j++){
+					if(mat[i][j]<0.00001)
+						recip[i][j] = 0.99;
+					else
+						recip[i][j] = 0.01;
+				}
+			}
+		}
+		return recip;
+	}
+	public void matrixAssignmentKM(HashMap<Instance, ArrayList<Instance>> assign, HashMap<ArrayList<Instance>, Double> ranks,
+			InstanceList queryIList, InstanceList paraIList, double[][] queryDistMat, double[][] paraDistMat){
+		double[][] queryMat = this.normalizeMatrix(queryDistMat);
+		double[][] paraMat = this.normalizeMatrix(paraDistMat);
+		
+		// We should be able to treat normalized distance dist. as prob. dist.
+		// because KLDiv is suppose to find similarity (information lost) between
+		// two dist. Right??
+		
+		double[][] paraQueryKLdivMat = new double[paraIList.size()][queryIList.size()];
+		double klVal;
+		for(int n=0; n<paraIList.size(); n++){
+			for(int m=0; m<queryIList.size(); m++){
+				
+				klVal = getKLdiv(paraMat[n], queryMat[m]); // This will give perfect KLDiv results
+				//klVal = getKLdiv(queryMat[m], paraMat[n]); // This will give some -ve KLDive results
+				
+				paraQueryKLdivMat[n][m] = klVal;
+			}
+		}
+		System.out.println("\nKLDiv matrix\n----------------\n");
+		for(int n=0; n<paraIList.size(); n++){
+			for(int m=0; m<queryIList.size(); m++){
+				System.out.printf("%16f ",paraQueryKLdivMat[n][m]);
+			}
+			System.out.println();
+		}
+		matrixAssignment(assign, ranks, queryIList, paraIList, paraQueryKLdivMat);
+	}
+	public void matrixAssignment(HashMap<Instance, ArrayList<Instance>> assign, HashMap<ArrayList<Instance>, Double> ranks,
 			InstanceList queryIList, InstanceList paraIList, double[][] queryMat, double[][] paraMat){
 		double[][] paraQueryKLdivMat = new double[paraIList.size()][queryIList.size()];
 		for(int n=0; n<paraIList.size(); n++){
 			for(int m=0; m<queryIList.size(); m++){
-				paraQueryKLdivMat[n][m] = getKLdiv(queryMat[m], paraMat[n]);
+				//paraQueryKLdivMat[n][m] = getKLdiv(queryMat[m], paraMat[n]);
+				paraQueryKLdivMat[n][m] = getKLdiv(paraMat[n], queryMat[m]);
 			}
 		}
-		matrixAssignment(assign, queryIList, paraIList, paraQueryKLdivMat);
+		System.out.println("\nKLDiv matrix\n----------------\n");
+		for(int n=0; n<paraIList.size(); n++){
+			
+			for(int m=0; m<queryIList.size(); m++){
+				System.out.printf("%16f ",paraQueryKLdivMat[n][m]);
+			}
+			System.out.println();
+		}
+		matrixAssignment(assign, ranks, queryIList, paraIList, paraQueryKLdivMat);
 	}
-	public void matrixAssignment(HashMap<Instance, ArrayList<Instance>> assign,
-			InstanceList queryIList, InstanceList paraIList, double[][] paraQueryMatrix){
+	public void matrixAssignment(HashMap<Instance, ArrayList<Instance>> assign, HashMap<ArrayList<Instance>, Double> ranks,
+			InstanceList queryIList, InstanceList paraIList, double[][] paraQueryKLDivMatrix){
+		ArrayList<Instance> ranksKey;
+		Instance secIns, pIns;
+		double matrixVal;
+		for(int n=0; n<paraIList.size(); n++){
+			for(int m=0; m<queryIList.size(); m++){
+				secIns = queryIList.get(m);
+				pIns = paraIList.get(n);
+				ranksKey = new ArrayList<Instance>();
+				ranksKey.add(0, secIns);
+				ranksKey.add(1, pIns);
+				matrixVal = paraQueryKLDivMatrix[n][m];
+				ranks.put(ranksKey, 1/matrixVal);
+				/*
+				if(matrixVal>0.0001){
+					ranks.put(ranksKey, 1/matrixVal);
+				} else{
+					System.out.println("Debug here");
+				}
+				*/
+			}
+		}
 		boolean[] isParaAssigned = new boolean[paraIList.size()];
 		for(int pos=0; pos<isParaAssigned.length; pos++)
 			isParaAssigned[pos] = false;
@@ -811,7 +983,7 @@ public class SingleRun {
 		for(int n=0; n<paraIList.size(); n++){
 			int bestQueryInd=0;
 			double minVal = 99999.0;
-			queryVals = paraQueryMatrix[n];
+			queryVals = paraQueryKLDivMatrix[n];
 			for(int m=0; m<queryIList.size(); m++){
 				if(queryVals[m]<minVal){
 					bestQueryInd = m;
@@ -821,19 +993,19 @@ public class SingleRun {
 			bestQueryForPara[n] = bestQueryInd;
 		}
 		boolean isDone = false;
-		double maxKLVal = getMaxVal(paraQueryMatrix);
+		double maxKLVal = getMaxVal(paraQueryKLDivMatrix);
 		int[] minInd = new int[2];
 		while(!isDone){
-			minInd = getMinValIndex(paraQueryMatrix, maxKLVal);
+			minInd = getMinValIndex(paraQueryKLDivMatrix, maxKLVal);
 			assign.get(queryIList.get(minInd[1])).add(paraIList.get(minInd[0]));
 			isParaAssigned[minInd[0]] = true;
-			for(int r=0; r<paraQueryMatrix.length; r++){
-				for(int c=0; c<paraQueryMatrix[0].length; c++){
+			for(int r=0; r<paraQueryKLDivMatrix.length; r++){
+				for(int c=0; c<paraQueryKLDivMatrix[0].length; c++){
 					if(r==minInd[0] || c==minInd[1])
-						paraQueryMatrix[r][c] = maxKLVal+1;
+						paraQueryKLDivMatrix[r][c] = maxKLVal+1;
 				}
 			}	
-			isDone = checkIfDone(paraQueryMatrix, maxKLVal);
+			isDone = checkIfDone(paraQueryKLDivMatrix, maxKLVal);
 		}
 		for(int n=0; n<isParaAssigned.length; n++){
 			if(!isParaAssigned[n])
