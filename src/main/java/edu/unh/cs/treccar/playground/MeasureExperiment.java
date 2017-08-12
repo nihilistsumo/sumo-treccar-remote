@@ -24,6 +24,7 @@ public class MeasureExperiment {
 			HashMap<String, ArrayList<String>> gt){
 		HashMap<String, Double> pageRANDMap = new HashMap<String, Double>();
 		for(String pageID:results.keySet()){
+			System.out.println();
 			ResultForPage r = results.get(pageID);
 			ArrayList<ArrayList<String>> clusters = r.getParaClusters();
 			ArrayList<ArrayList<String>> currGTClusters = new ArrayList<ArrayList<String>>();
@@ -36,13 +37,13 @@ public class MeasureExperiment {
 					currGTClusters.add(gt.get(gtQuery));
 			}
 			
-			String resultString = "";
-			
-			
 			int[][] contingencyMatrix = new int[currGTClusters.size()][clusters.size()];
 			//double randIndex = 0.0;
 			ArrayList<String> correctParas = new ArrayList<String>();
 			ArrayList<String> candParas = new ArrayList<String>();
+			ArrayList<String> allParas = new ArrayList<String>();
+			for(ArrayList<String> cl:clusters)
+				allParas.addAll(cl);
 			for(int i=0; i<currGTClusters.size(); i++){
 				for(int j=0; j<clusters.size(); j++){
 					int matchCount = 0;
@@ -60,6 +61,7 @@ public class MeasureExperiment {
 					contingencyMatrix[i][j] = matchCount;
 				}
 			}
+			clusteringInfo(clusters, currGTClusters, allParas);
 			System.out.println("Contingency table for "+pageID);
 			printContingencyMatrix(contingencyMatrix);
 			Double rand = computeRand(contingencyMatrix);
@@ -71,6 +73,34 @@ public class MeasureExperiment {
 			}
 		}
 		return pageRANDMap;
+	}
+	public HashMap<String, Integer> paraLabelMap(ArrayList<ArrayList<String>> clusters){
+		HashMap<String, Integer> map = new HashMap<String, Integer>();
+		for(int label=0; label<clusters.size(); label++){
+			for(String p:clusters.get(label))
+				map.put(p, label);
+		}
+		return map;
+	}
+	public void clusteringInfo(ArrayList<ArrayList<String>> clusters, 
+			ArrayList<ArrayList<String>> gt, ArrayList<String> paras){
+		HashMap<String, Integer> clmap = paraLabelMap(clusters);
+		HashMap<String, Integer> gtmap = paraLabelMap(gt);
+		int tp=0, tn=0, fp=0, fn=0;
+		for(int i=0; i<paras.size()-1; i++){
+			for(int j=i+1; j<paras.size(); j++){
+				if(clmap.get(paras.get(i))==clmap.get(paras.get(j)) && gtmap.get(paras.get(i))==gtmap.get(paras.get(j)))
+					tp++;
+				else if(clmap.get(paras.get(i))!=clmap.get(paras.get(j)) && gtmap.get(paras.get(i))!=gtmap.get(paras.get(j)))
+					tn++;
+				else if(clmap.get(paras.get(i))==clmap.get(paras.get(j)) && gtmap.get(paras.get(i))!=gtmap.get(paras.get(j)))
+					fp++;
+				else if(clmap.get(paras.get(i))!=clmap.get(paras.get(j)) && gtmap.get(paras.get(i))==gtmap.get(paras.get(j)))
+					fn++;
+			}
+		}
+		System.out.println("No of paras: "+paras.size()+", True +ve: "+tp+", True -ve: "+tn+", False +ve: "+fp+", False -ve: "+fn);
+		System.out.println("RAND = "+((double)(tp+tn))/(tp+tn+fp+fn));
 	}
 	public HashMap<String, Double> calculatePurityPerPage(){
 		return this.calculatePurityPerPage(this.getResultFromExperiment(), this.getGtMap());
@@ -101,14 +131,16 @@ public class MeasureExperiment {
 	}
 	private double computeRand(int[][] contMat){
 		double score = 0.0;
-		int sumnij=0, sumni=0, sumnj=0, nC2=0, nrow=0, ncol=0, n=0;		
+		int sumnij=0, sumni=0, sumnj=0, nC2=0, nrow=0, ncol=0, n=0;
+		int a=0, b=0, c=0, d=0;
 		ncol = contMat[0].length;
 		nrow = contMat.length;
+		int[] nivals = new int[nrow];
 		int[] njvals = new int[ncol];
 		//nC2 = this.nC2(ncol+nrow);
 		for(int r=0; r<nrow; r++){
-			for(int c=0; c<ncol; c++)
-				n+=contMat[r][c];
+			for(int co=0; co<ncol; co++)
+				n+=contMat[r][co];
 		}
 		nC2 = this.nC2(n);
 		for(int i=0; i<nrow; i++){
@@ -118,6 +150,7 @@ public class MeasureExperiment {
 				ni+=contMat[i][j];
 				njvals[j]+=contMat[i][j];
 			}
+			nivals[i]=ni;
 			sumni+=this.nC2(ni);
 		}
 		for(int j=0; j<njvals.length; j++){
@@ -138,8 +171,8 @@ public class MeasureExperiment {
 		
 		double denom = ((double)(sumni+sumnj))/2-((double)sumni*sumnj/nC2);
 		double nom = (sumnij-((double)(sumni*sumnj))/nC2);
-		System.out.println("n: "+n+", sumnij: "+sumnij+", sumni: "+sumni+", sumnj: "+sumnj+", nC2: "+nC2+", nom: "+nom+", denom: "+denom);
 		score = nom/denom;
+		System.out.println("n: "+n+", nom: "+nom+", denom: "+denom+", Adjusted RAND = "+score);
 		return score;
 	}
 	public double computePurity(ArrayList<ArrayList<String>> candidateClusters, ArrayList<ArrayList<String>> gtClusters){

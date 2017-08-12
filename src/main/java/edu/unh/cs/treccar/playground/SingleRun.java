@@ -30,6 +30,7 @@ import cc.mallet.pipe.TokenSequenceRemoveStopwords;
 import cc.mallet.topics.TopicAssignment;
 import cc.mallet.topics.TopicInferencer;
 import cc.mallet.types.FeatureSequence;
+import cc.mallet.types.FeatureVector;
 import cc.mallet.types.Instance;
 import cc.mallet.types.InstanceList;
 import cc.mallet.types.Metric;
@@ -156,31 +157,8 @@ public class SingleRun {
 					System.exit(1);
 				}
 			}
-			//-- ############################################# --//
 		}
-		/*
-		if(RunExperiment.SAVE_RESULT){
-			try{
-				String runid;
-				if(this.model==3)
-					runid = "run"+this.k+this.numIter+this.model+this.betaSum+RunExperiment.SMOOTHED_UMM;
-				else
-					runid = "run"+this.k+this.numIter+this.model+this.tw+this.alphaSum+this.betaSum;
-				FileWriter fw = new FileWriter(this.outputPath+"/"+RunExperiment.TRECEVAL_ASSIGN_FILENAME, true);
-				for(String p:resultPerPageID.keySet()){
-					HashMap<String, ArrayList<String>> currQParaAssign = resultPerPageID.get(p).getQueryParaAssignment();
-					for(String q:currQParaAssign.keySet()){
-						ArrayList<String> candParaIDs = currQParaAssign.get(q);
-						for(String para:candParaIDs)
-							fw.write(q+" 0 "+para+" 0 1 "+runid+"\n");
-					}
-				}
-				fw.close();
-			} catch(IOException e){
-				e.printStackTrace();
-			}
-		}
-		*/
+		
 		
 		// Measure performance from resultPerPageID and store result
 		MeasureExperiment me = new MeasureExperiment(resultPerPageID, this.gtSecParaMap);
@@ -462,6 +440,7 @@ public class SingleRun {
 	private ResultForPage assignUsingRandom(InstanceList paraIList, InstanceList queryIList, Data.Page page){
 		Random rand = new Random();
 		HashMap<String, ArrayList<String>> assign = new HashMap<String, ArrayList<String>>();
+		HashMap<ArrayList<Instance>, Double> ranks = new HashMap<ArrayList<Instance>, Double>();
 		ArrayList<ArrayList<String>> paraClusters = new ArrayList<ArrayList<String>>();
 		ResultForPage r = new ResultForPage();
 		ArrayList<String> queryIDs = new ArrayList<String>();
@@ -478,6 +457,15 @@ public class SingleRun {
 		}
 		for(Instance pIns:paraIList)
 			paraIDs.add(pIns.getName().toString());
+		ArrayList<Instance> rankKey;
+		for(Instance q:queryIList){
+			for(Instance p:paraIList){
+				rankKey = new ArrayList<Instance>();
+				rankKey.add(0, q);
+				rankKey.add(1, p);
+				ranks.put(rankKey, rand.nextDouble());
+			}
+		}
 		int qindex=0, pindex;
 		// To guarantee that every sec/que got some para //
 		while(!paraIDs.isEmpty() && qindex<queryIDs.size()){
@@ -503,6 +491,7 @@ public class SingleRun {
 		for(String qry:assign.keySet())
 			paraClusters.add(assign.get(qry));
 		r.setQueryParaAssignment(assign);
+		r.setQueryParaRank(convRanksToIDRanks(ranks, page));
 		r.setParaClusters(paraClusters);
 		return r;
 	}
@@ -700,11 +689,80 @@ public class SingleRun {
 		}
 		return result;
 	}
+	private double getKSD(double[] p, double[] q){
+		double result = 0, sump = 0, sumq = 0, sumpTemp = 0, sumqTemp = 0, diff;
+		for(int i=0; i<p.length; i++){
+			sump+=p[i];
+			sumq+=q[i];
+		}
+		result = 0;
+		for(int i=0; i<p.length; i++){
+			sumpTemp+=p[i];
+			sumqTemp+=q[i];
+			diff = Math.abs(sumpTemp/sump - sumqTemp/sumq);
+			if(diff>result)
+				result = diff;
+		}
+		return result;
+	}
+	private double getBD(double[] p, double[] q){
+		double result = 0;
+		for(int i=0; i<p.length; i++){
+			if(p[i]<0 || q[i]<0)
+				continue;
+			result+=Math.sqrt(p[i]*q[i]);
+		}
+		result = - Math.log(result);
+		return result;
+	}
+	private double getChiD(double[] p, double[] q){
+		double result = 0;
+		for(int i=0; i<p.length; i++)
+			result+= ((p[i]-q[i])*(p[i]-q[i]))/(p[i]+q[i]);
+		return result;
+	}
 	private InstanceList convertQueriesToIList(ArrayList<String> queries){
 		InstanceList qIList = new InstanceList(SingleRun.buildPipe(this.model));
 		for(String q:queries){
 			Instance secIns = new Instance(q.replaceAll("%20|/", " "), null, q, q);
 			qIList.addThruPipe(secIns);
+		}
+		if(this.tw == 1){ //TD
+			if(qIList.getDataClass()==FeatureVector.class){
+				SparseVector vec;
+				for(Instance p:qIList){
+					double d = 0;
+					vec = (SparseVector) p.getData();
+					for(double freq:vec.getValues())
+						d+=freq;
+					for(int index:vec.getIndices())
+						vec.setValue(index, vec.value(index)/d);
+				}
+			}
+			else{
+				System.out.println("TF variants are only implemented for SparseVectors. Using default tw value 0");
+			}
+		} else if(this.tw == 2){ //TDS
+			final double beta = 10;
+			double v = 0;
+			double[] d = new double[qIList.size()];
+			if(qIList.getDataClass()==FeatureVector.class){
+				SparseVector vec;
+				for(int i=0; i<qIList.size(); i++){
+					vec = (SparseVector) qIList.get(i).getData();
+					for(double freq:vec.getValues())
+						d[i]+=freq;
+					v+=d[i];
+				}
+				for(int i=0; i<qIList.size(); i++){
+					vec = (SparseVector) qIList.get(i).getData();
+					for(int index:vec.getIndices())
+						vec.setValue(index, (vec.value(index)+beta)/(v*d[i]*beta));
+				}
+			}
+			else{
+				System.out.println("TF variants are only implemented for SparseVectors. Using default tw value 0");
+			}
 		}
 		return qIList;
 	}
@@ -713,6 +771,43 @@ public class SingleRun {
 		for(Data.Paragraph paraObj:paraObjs){
 			Instance paraIns = new Instance(paraObj.getTextOnly(), null, paraObj.getParaId(), paraObj.getTextOnly());
 			iListPara.addThruPipe(paraIns);
+		}
+		if(this.tw == 1){ //TD
+			if(iListPara.getDataClass()==FeatureVector.class){
+				SparseVector vec;
+				for(Instance p:iListPara){
+					double d = 0;
+					vec = (SparseVector) p.getData();
+					for(double freq:vec.getValues())
+						d+=freq;
+					for(int index:vec.getIndices())
+						vec.setValue(index, vec.value(index)/d);
+				}
+			}
+			else{
+				System.out.println("TF variants are only implemented for SparseVectors. Using default tw value 0");
+			}
+		} else if(this.tw == 2){ //TDS
+			final double beta = 10;
+			double v = 0;
+			double[] d = new double[iListPara.size()];
+			if(iListPara.getDataClass()==FeatureVector.class){
+				SparseVector vec;
+				for(int i=0; i<iListPara.size(); i++){
+					vec = (SparseVector) iListPara.get(i).getData();
+					for(double freq:vec.getValues())
+						d[i]+=freq;
+					v+=d[i];
+				}
+				for(int i=0; i<iListPara.size(); i++){
+					vec = (SparseVector) iListPara.get(i).getData();
+					for(int index:vec.getIndices())
+						vec.setValue(index, (vec.value(index)+beta)/(v*d[i]*beta));
+				}
+			}
+			else{
+				System.out.println("TF variants are only implemented for SparseVectors. Using default tw value 0");
+			}
 		}
 		return iListPara;
 	}
@@ -913,47 +1008,83 @@ public class SingleRun {
 		// because KLDiv is suppose to find similarity (information lost) between
 		// two dist. Right??
 		
-		double[][] paraQueryKLdivMat = new double[paraIList.size()][queryIList.size()];
-		double klVal;
+		double[][] paraQueryMat = new double[paraIList.size()][queryIList.size()];
+		double matVal;
 		for(int n=0; n<paraIList.size(); n++){
 			for(int m=0; m<queryIList.size(); m++){
-				
-				klVal = getKLdiv(paraMat[n], queryMat[m]); // This will give perfect KLDiv results
-				//klVal = getKLdiv(queryMat[m], paraMat[n]); // This will give some -ve KLDive results
-				
-				paraQueryKLdivMat[n][m] = klVal;
+				switch(RunExperiment.ASSIGN_METHOD){
+				case 1:
+					matVal = getKLdiv(paraMat[n], queryMat[m]); // This will give perfect KLDiv results
+					//klVal = getKLdiv(queryMat[m], paraMat[n]); // This will give some -ve KLDive results
+					paraQueryMat[n][m] = matVal;
+					break;
+				case 2:
+					matVal = getKSD(paraMat[n], queryMat[m]);
+					paraQueryMat[n][m] = matVal;
+					break;
+				case 3:
+					matVal = getBD(paraMat[n], queryMat[m]);
+					paraQueryMat[n][m] = matVal;
+					break;
+				case 4:
+					matVal = getChiD(paraMat[n], queryMat[m]);
+					paraQueryMat[n][m] = matVal;
+					break;
+				default:
+					System.out.println("Wrong assign method");
+				}
 			}
 		}
-		System.out.println("\nKLDiv matrix\n----------------\n");
+		System.out.println("\nparaQuery matrix\n----------------\n");
 		for(int n=0; n<paraIList.size(); n++){
 			for(int m=0; m<queryIList.size(); m++){
-				System.out.printf("%16f ",paraQueryKLdivMat[n][m]);
+				System.out.printf("%16f ",paraQueryMat[n][m]);
 			}
 			System.out.println();
 		}
-		matrixAssignment(assign, ranks, queryIList, paraIList, paraQueryKLdivMat);
+		matrixAssignment(assign, ranks, queryIList, paraIList, paraQueryMat);
 	}
 	public void matrixAssignment(HashMap<Instance, ArrayList<Instance>> assign, HashMap<ArrayList<Instance>, Double> ranks,
 			InstanceList queryIList, InstanceList paraIList, double[][] queryMat, double[][] paraMat){
-		double[][] paraQueryKLdivMat = new double[paraIList.size()][queryIList.size()];
+		double[][] paraQueryMat = new double[paraIList.size()][queryIList.size()];
+		double matVal;
 		for(int n=0; n<paraIList.size(); n++){
 			for(int m=0; m<queryIList.size(); m++){
-				//paraQueryKLdivMat[n][m] = getKLdiv(queryMat[m], paraMat[n]);
-				paraQueryKLdivMat[n][m] = getKLdiv(paraMat[n], queryMat[m]);
+				switch(RunExperiment.ASSIGN_METHOD){
+				case 1:
+					matVal = getKLdiv(paraMat[n], queryMat[m]); // This will give perfect KLDiv results
+					//klVal = getKLdiv(queryMat[m], paraMat[n]); // This will give some -ve KLDive results
+					paraQueryMat[n][m] = matVal;
+					break;
+				case 2:
+					matVal = getKSD(paraMat[n], queryMat[m]);
+					paraQueryMat[n][m] = matVal;
+					break;
+				case 3:
+					matVal = getBD(paraMat[n], queryMat[m]);
+					paraQueryMat[n][m] = matVal;
+					break;
+				case 4:
+					matVal = getChiD(paraMat[n], queryMat[m]);
+					paraQueryMat[n][m] = matVal;
+					break;
+				default:
+					System.out.println("Wrong assign method");
+				}
 			}
 		}
-		System.out.println("\nKLDiv matrix\n----------------\n");
+		System.out.println("\nparaQuery matrix\n----------------\n");
 		for(int n=0; n<paraIList.size(); n++){
 			
 			for(int m=0; m<queryIList.size(); m++){
-				System.out.printf("%16f ",paraQueryKLdivMat[n][m]);
+				System.out.printf("%16f ",paraQueryMat[n][m]);
 			}
 			System.out.println();
 		}
-		matrixAssignment(assign, ranks, queryIList, paraIList, paraQueryKLdivMat);
+		matrixAssignment(assign, ranks, queryIList, paraIList, paraQueryMat);
 	}
 	public void matrixAssignment(HashMap<Instance, ArrayList<Instance>> assign, HashMap<ArrayList<Instance>, Double> ranks,
-			InstanceList queryIList, InstanceList paraIList, double[][] paraQueryKLDivMatrix){
+			InstanceList queryIList, InstanceList paraIList, double[][] paraQueryMatrix){
 		ArrayList<Instance> ranksKey;
 		Instance secIns, pIns;
 		double matrixVal;
@@ -964,7 +1095,7 @@ public class SingleRun {
 				ranksKey = new ArrayList<Instance>();
 				ranksKey.add(0, secIns);
 				ranksKey.add(1, pIns);
-				matrixVal = paraQueryKLDivMatrix[n][m];
+				matrixVal = paraQueryMatrix[n][m];
 				ranks.put(ranksKey, 1/matrixVal);
 				/*
 				if(matrixVal>0.0001){
@@ -983,7 +1114,7 @@ public class SingleRun {
 		for(int n=0; n<paraIList.size(); n++){
 			int bestQueryInd=0;
 			double minVal = 99999.0;
-			queryVals = paraQueryKLDivMatrix[n];
+			queryVals = paraQueryMatrix[n];
 			for(int m=0; m<queryIList.size(); m++){
 				if(queryVals[m]<minVal){
 					bestQueryInd = m;
@@ -993,19 +1124,19 @@ public class SingleRun {
 			bestQueryForPara[n] = bestQueryInd;
 		}
 		boolean isDone = false;
-		double maxKLVal = getMaxVal(paraQueryKLDivMatrix);
+		double maxKLVal = getMaxVal(paraQueryMatrix);
 		int[] minInd = new int[2];
 		while(!isDone){
-			minInd = getMinValIndex(paraQueryKLDivMatrix, maxKLVal);
+			minInd = getMinValIndex(paraQueryMatrix, maxKLVal);
 			assign.get(queryIList.get(minInd[1])).add(paraIList.get(minInd[0]));
 			isParaAssigned[minInd[0]] = true;
-			for(int r=0; r<paraQueryKLDivMatrix.length; r++){
-				for(int c=0; c<paraQueryKLDivMatrix[0].length; c++){
+			for(int r=0; r<paraQueryMatrix.length; r++){
+				for(int c=0; c<paraQueryMatrix[0].length; c++){
 					if(r==minInd[0] || c==minInd[1])
-						paraQueryKLDivMatrix[r][c] = maxKLVal+1;
+						paraQueryMatrix[r][c] = maxKLVal+1;
 				}
 			}	
-			isDone = checkIfDone(paraQueryKLDivMatrix, maxKLVal);
+			isDone = checkIfDone(paraQueryMatrix, maxKLVal);
 		}
 		for(int n=0; n<isParaAssigned.length; n++){
 			if(!isParaAssigned[n])
