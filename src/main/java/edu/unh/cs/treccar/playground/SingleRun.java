@@ -409,12 +409,13 @@ public class SingleRun {
 	}
 	private ResultForPage assignUsingAllCorrect(InstanceList paraIList, InstanceList queryIList, Data.Page page){
 		HashMap<String, ArrayList<String>> assign = new HashMap<String, ArrayList<String>>();
+		HashMap<ArrayList<Instance>, Double> ranks = new HashMap<ArrayList<Instance>, Double>();
 		ArrayList<ArrayList<String>> paraClusters = new ArrayList<ArrayList<String>>();
 		ResultForPage r = new ResultForPage();
 		ArrayList<String> queryIDs = new ArrayList<String>();
 		ArrayList<String> paraIDs = new ArrayList<String>();
+		String pageid = page.getPageId();
 		for(Instance qIns:queryIList){
-			String pageid = page.getPageId();
 			String q = qIns.getName().toString();
 			if(q.equals(pageid))
 				q = pageid;
@@ -431,9 +432,29 @@ public class SingleRun {
 			}
 			assign.get(q).addAll(paraIDs);
 		}
+		ArrayList<Instance> rankKey;
+		String qid, pid;
+		for(Instance q:queryIList){
+			qid = q.getName().toString();
+			if(qid.equals(pageid))
+				qid = pageid;
+			else
+				qid = pageid+"/"+qid;
+			for(Instance p:paraIList){
+				pid = p.getName().toString();
+				rankKey = new ArrayList<Instance>();
+				rankKey.add(0, q);
+				rankKey.add(1, p);
+				if(assign.get(qid).contains(pid))
+					ranks.put(rankKey, 1.0);
+				else
+					ranks.put(rankKey, 0.0);
+			}
+		}
 		for(String qry:assign.keySet())
 			paraClusters.add(assign.get(qry));
 		r.setQueryParaAssignment(assign);
+		r.setQueryParaRank(convRanksToIDRanks(ranks, page));
 		r.setParaClusters(paraClusters);
 		return r;
 	}

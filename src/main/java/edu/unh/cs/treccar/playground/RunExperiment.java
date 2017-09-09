@@ -7,12 +7,12 @@ import com.trolltech.qt.gui.*;
 public class RunExperiment {
 	// k0beta_umm
 	public static final boolean SAVE_RESULT = true;
-	public static final String CLUSTERING_MEASURE_FILENAME = "chi_km_tds";
-	public static final String TRECEVAL_ASSIGN_FILENAME = "chi_km_tds_trec";
+	public static final String CLUSTERING_MEASURE_FILENAME = "random";
+	public static final String TRECEVAL_ASSIGN_FILENAME = "random_trec";
 	public static final boolean RUN_BY_PAGE = true;
 	public static final boolean ASSIGN_RANK_MODE = true;
 	public static final boolean SMOOTHED_UMM = false;
-	public static final int ASSIGN_METHOD = 4; // 1- KLDiv, 2- KS, 3- Bhat, 4- Chi
+	public static final int ASSIGN_METHOD = 1; // 1- KLDiv, 2- KS, 3- Bhat, 4- Chi
 	
 	public static void main(String[] args) {
 		// TODO Auto-generated method stub
@@ -26,8 +26,8 @@ public class RunExperiment {
 
         QApplication.execStatic();
         */
-        String model = "2";
-        // 1 for LDA, 2 for kmeans, 3 for unigram tm
+        String model = "99";
+        // 1 for LDA, 2 for kmeans, 3 for unigram tm, 98 all correct, 99 random
         String tw = "0"; // 0- tf (default), 1- td, 2- tds
         String startK="0", startIter="100", startAlpha="1.0", startBeta="260"; 
         // treat alpha and beta as alphaSum and betaSum
@@ -60,7 +60,7 @@ public class RunExperiment {
         		        		"/home/sumanta/Documents/new_research/unh/test200-v1.4/all.test200.cbor.outlines",
         		        		"/home/sumanta/Documents/new_research/unh/test200-v1.4/all.test200.cbor.toplevel.qrels",
         		        		"/home/sumanta/Documents/new_research/unh/test200-v1.4/all.test200.cbor.article.qrels",
-        		        		"/home/sumanta/Documents/new_research/unh/test200-v1.4results/detective_results"});
+        		        		"/home/sumanta/Documents/new_research/unh/test200-v1.4results/detective_results2"});
         		        if(RunExperiment.RUN_BY_PAGE)
         		        	sr.runExperiment();
         		        else
